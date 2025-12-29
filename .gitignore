@@ -1,0 +1,41 @@
+# General
+.DS_Store
+Thumbs.db
+*.log
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node.js (Frontend)
+node_modules/
+dist/
+build/
+coverage/
+.env
+.env.local
+.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+playwright-report/
+test-results/
+
+# Go (Backend)
+# Binaries
+*.exe
+*.test
+*.prof
+
+# Vendor (unless checking in vendor is desired, standard is not to for apps using modules)
+vendor/
+
+# Project Specific
+backend/server.log
+backend/config.json
+backend/data/*
+!backend/data/.gitkeep
+backend/uploads/*
+!backend/uploads/.gitkeep

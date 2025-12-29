@@ -1,0 +1,43 @@
+{
+  "Mu": {},
+  "BookID": "",
+  "CurrentBookPath": "",
+  "Chapters": null,
+  "Analysis": {
+    "ch_test": [
+      {
+        "text": "This is a mock narration segment.",
+        "speaker": "Narrator",
+        "emotion": "calm"
+      },
+      {
+        "text": "This is a mock dialogue segment.",
+        "speaker": "Hero",
+        "emotion": "happy"
+      },
+      {
+        "text": "Another mock narration.",
+        "speaker": "Narrator",
+        "emotion": "calm"
+      }
+    ]
+  },
+  "DetectedCharacters": {
+    "Hero": true,
+    "Narrator": true
+  },
+  "VoiceMapping": {
+    "Hero": {
+      "voiceId": "voice_10.wav",
+      "emotion": "calm",
+      "speed": 1,
+      "refAudio": "C:\\Users\\paulx\\Downloads\\index-tts\\examples\\voice_10.wav"
+    },
+    "Narrator": {
+      "voiceId": "voice_05.wav",
+      "emotion": "calm",
+      "speed": 1,
+      "refAudio": "C:\\Users\\paulx\\Downloads\\index-tts\\examples\\voice_05.wav"
+    }
+  }
+}

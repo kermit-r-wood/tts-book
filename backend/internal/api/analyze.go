@@ -1,0 +1,345 @@
+package api
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+
+	"math/rand"
+	"path/filepath"
+	"time"
+
+	// Added for time.Sleep
+	"tts-book/backend/internal/audio"
+	"tts-book/backend/internal/config"
+	"tts-book/backend/internal/llm"
+	"tts-book/backend/internal/tts"
+
+	"github.com/gin-gonic/gin"
+)
+
+// GenerateAudio orchestrates the TTS generation
+func GenerateAudio(c *gin.Context) {
+	chapterID := c.Param("chapterID")
+
+	Store.Mu.RLock()
+	segments, ok := Store.Analysis[chapterID]
+	// mapping := Store.VoiceMapping // Copy if needed
+	Store.Mu.RUnlock()
+
+	if !ok || len(segments) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Chapter not analyzed yet"})
+		return
+	}
+
+	// Start async generation
+	go func() {
+		BroadcastProgress(chapterID, 0, "Initializing TTS...")
+
+		// Initialize TTS Client
+		cfg := config.Get()
+		ttsClient := tts.NewClient(cfg)
+
+		// Prepare temp dir
+		tempDir := fmt.Sprintf("data/temp/%s", chapterID)
+		os.MkdirAll(tempDir, 0755)
+		os.MkdirAll("data/out", 0755) // Ensure output dir exists
+
+		total := len(segments)
+		var filePaths []string
+
+		for i, seg := range segments {
+			// Determine voice/emotion from mapping
+			Store.Mu.RLock()
+			mapping, hasMapping := Store.VoiceMapping[seg.Speaker]
+			Store.Mu.RUnlock()
+
+			voice := ""
+			speed := 1.0
+			emotion := seg.Emotion
+
+			if hasMapping {
+				voice = mapping.RefAudio // Use full path for internal use
+				if voice == "" {
+					voice = mapping.VoiceID // Fallback
+				}
+				speed = mapping.Speed
+				if mapping.Emotion != "" {
+					emotion = mapping.Emotion
+				}
+			}
+
+			if emotion == "" {
+				emotion = "calm"
+			}
+
+			// Generate
+			// Generate
+			runes := []rune(seg.Text)
+			display := string(runes)
+			if len(runes) > 10 {
+				display = string(runes[:10])
+			}
+			BroadcastProgress(chapterID, int((float64(i)/float64(total))*100), fmt.Sprintf("Generating (%d/%d): %s...", i+1, total, display))
+
+			audioData, err := ttsClient.Generate(seg.Text, voice, emotion, speed)
+			if err != nil {
+				log.Printf("[TTS] Error generating segment %d: %v", i, err)
+				// Continue? Or Fail? Let's continue and skip for robustness, or fail.
+				// Fail is safer for now.
+				BroadcastProgress(chapterID, 0, fmt.Sprintf("Error: %v", err))
+				return
+			}
+
+			// Save temp file
+			filePath := fmt.Sprintf("%s/%d.wav", tempDir, i)
+			if err := os.WriteFile(filePath, audioData, 0644); err != nil {
+				log.Printf("[TTS] Failed to write temp file: %v", err)
+				return
+			}
+			filePaths = append(filePaths, filePath)
+		}
+
+		// Merge
+		BroadcastProgress(chapterID, 95, "Merging Audio Files...")
+		outPath := fmt.Sprintf("data/out/%s.wav", chapterID)
+
+		if err := audio.MergeWavFiles(filePaths, outPath); err != nil {
+			log.Printf("[TTS] Merge failed: %v", err)
+			BroadcastProgress(chapterID, 0, fmt.Sprintf("Merge Error: %v", err))
+			return
+		}
+
+		// Cleanup temp
+		os.RemoveAll(tempDir)
+
+		BroadcastProgress(chapterID, 100, "Generation Complete!")
+	}()
+
+	c.JSON(http.StatusOK, gin.H{"status": "started", "chapterId": chapterID})
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func AnalyzeChapter(c *gin.Context) {
+	chapterID := c.Param("chapterID")
+	force := c.Query("force") == "true"
+
+	// Check if already analyzed (and not forcing re-analysis)
+	Store.Mu.RLock()
+	existing, exists := Store.Analysis[chapterID]
+	Store.Mu.RUnlock()
+
+	if exists && len(existing) > 0 && !force {
+		log.Printf("[Analyze] Returning cached analysis for chapter %s", chapterID)
+		c.JSON(http.StatusOK, gin.H{
+			"chapterId": chapterID,
+			"results":   existing,
+			"cached":    true, // Optional: let frontend know it was cached
+		})
+		return
+	}
+
+	// Retrieve chapter content from memory store
+	// For MVP, we iterate LoadedChapters["current"] to find ID
+	chapters, ok := LoadedChapters["current"]
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No book loaded"})
+		return
+	}
+
+	var textToAnalyze string
+	for _, ch := range chapters {
+		if ch.ID == chapterID {
+			textToAnalyze = ch.Content
+			break
+		}
+	}
+
+	if textToAnalyze == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Chapter not found or empty"})
+		return
+	}
+
+	// Initialize LLM Client
+	cfg := config.Get()
+	if cfg.LLMAPIKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "LLM API Key is missing in config"})
+		return
+	}
+
+	client := llm.NewClient(cfg)
+
+	// Chunking text to prevent LLM context issues (losing narrators)
+	// Limit based on config
+	limit := cfg.LLMChunkSize
+	if limit <= 0 {
+		limit = 1000
+	}
+	chunks := SplitText(textToAnalyze, limit)
+	log.Printf("[Analyze] Split Chapter %s into %d chunks (limit: %d)\n", chapterID, len(chunks), limit)
+
+	var allResults []llm.AnalysisResult
+
+	for i, chunk := range chunks {
+		log.Printf("[Analyze] Processing chunk %d/%d (len: %d)\n", i+1, len(chunks), len(chunk))
+
+		results, err := client.AnalyzeTextStream(chunk, func(token string) {
+			BroadcastLLMOutput(chapterID, token)
+		})
+		if err != nil {
+			log.Printf("[Analyze] Chunk %d failed: %v\n", i+1, err)
+			// Continue with best effort? Or fail?
+			// Let's log and likely continue to get partial results, but appending nothing for this chunk.
+			// Or better, error out to let user know something went wrong.
+			// Given "prevent this behavior", reliability is key. But one chunk fail shouldn't necessarily kill everything if others worked.
+			// However, to be safe, let's treat it as a task failure for now so user can retry.
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Analysis failed at chunk %d: %v", i+1, err)})
+			return
+		}
+
+		allResults = append(allResults, results...)
+	}
+
+	log.Printf("[Analyze] Success. Found total %d segments.\n", len(allResults))
+
+	// Save results to Store
+	// Auto-assign voices to new characters
+	voiceDir := cfg.VoiceDir
+	if voiceDir == "" {
+		voiceDir = "voices" // Fallback if config is empty
+	}
+	availableVoices, err := GetVoicesFromDir(voiceDir)
+	if err != nil {
+		log.Printf("[Analyze] Warning: Could not list voices from %s: %v", voiceDir, err)
+	}
+
+	// Shuffle voices for random assignment
+	if len(availableVoices) > 0 {
+		rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+		rnd.Shuffle(len(availableVoices), func(i, j int) {
+			availableVoices[i], availableVoices[j] = availableVoices[j], availableVoices[i]
+		})
+	}
+
+	Store.Mu.Lock()
+	Store.Analysis[chapterID] = allResults
+
+	nextVoiceIdx := 0
+	for _, r := range allResults {
+		if r.Speaker != "" {
+			Store.DetectedCharacters[r.Speaker] = true
+
+			// Assign voice if character doesn't have one OR has one with empty VoiceID
+			config, exists := Store.VoiceMapping[r.Speaker]
+			if (!exists || config.VoiceID == "") && len(availableVoices) > 0 {
+				// Pick next voice
+				voicePath := availableVoices[nextVoiceIdx%len(availableVoices)]
+				nextVoiceIdx++
+
+				Store.VoiceMapping[r.Speaker] = VoiceConfig{
+					VoiceID:  filepath.Base(voicePath),
+					RefAudio: voicePath,
+					Emotion:  "calm",
+					Speed:    1.0,
+				}
+				log.Printf("[Analyze] Auto-assigned voice %s to character %s", filepath.Base(voicePath), r.Speaker)
+			}
+		}
+	}
+	Store.Mu.Unlock()
+
+	// Persist
+	if err := Store.Save(); err != nil {
+		log.Printf("[Analyze] Warning: Failed to save store: %v", err)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"chapterId": chapterID,
+		"results":   allResults,
+	})
+}
+
+// SplitText splits a large string into chunks strictly less than limit.
+// It tries to split at paragraph boundaries (\n\n), then sentences (.), then arbitrary.
+func SplitText(text string, limit int) []string {
+	if len(text) <= limit {
+		return []string{text}
+	}
+
+	var chunks []string
+	runes := []rune(text)
+	length := len(runes)
+
+	start := 0
+	for start < length {
+		end := start + limit
+		if end >= length {
+			chunks = append(chunks, string(runes[start:]))
+			break
+		}
+
+		// Look for best split point
+		// 1. Try \n\n (Paragraphs) within the last 20% of the chunk window to ensure we don't stick to the very end
+		// Actually, just look backwards from 'end'
+
+		foundSplit := false
+		splitIdx := -1
+
+		// Look backwards for \n\n
+		searchLimit := 1000 // How far back to search for ideal break
+		if searchLimit > limit {
+			searchLimit = limit / 2
+		}
+
+		// Priority 1: Double Newline
+		for i := end; i > start+limit-searchLimit && i > start; i-- {
+			if i+1 < length && runes[i] == '\n' && runes[i-1] == '\n' {
+				splitIdx = i + 1 // Include the newlines in the previous chunk or next?
+				// Usually split after newlines.
+				splitIdx = i + 1
+				foundSplit = true
+				break
+			}
+		}
+
+		// Priority 2: Single Newline
+		if !foundSplit {
+			for i := end; i > start+limit-searchLimit && i > start; i-- {
+				if runes[i] == '\n' {
+					splitIdx = i + 1
+					foundSplit = true
+					break
+				}
+			}
+		}
+
+		// Priority 3: Sentence ending (.!?)
+		if !foundSplit {
+			for i := end; i > start+limit-searchLimit && i > start; i-- {
+				c := runes[i]
+				if (c == '。' || c == '！' || c == '？') && (i+1 < length && runes[i+1] == ' ') {
+					splitIdx = i + 1
+					foundSplit = true
+					break
+				}
+			}
+		}
+
+		// Fallback: Hard limit
+		if !foundSplit {
+			splitIdx = end
+		}
+
+		chunks = append(chunks, string(runes[start:splitIdx]))
+		start = splitIdx
+	}
+
+	return chunks
+}
