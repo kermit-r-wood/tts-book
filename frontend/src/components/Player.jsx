@@ -29,6 +29,23 @@ export default function Player({ chapterId }) {
         };
     }, [chapterId]);
 
+    // Check if audio already exists when component mounts
+    useEffect(() => {
+        const checkExistingAudio = async () => {
+            try {
+                const response = await api.checkAudioStatus(chapterId);
+                if (response.data.exists) {
+                    setHasStarted(true);
+                    setProgress(100);
+                    setLogs(['Audio already generated']);
+                }
+            } catch (err) {
+                console.error('Failed to check audio status:', err);
+            }
+        };
+        checkExistingAudio();
+    }, [chapterId]);
+
     const handleStart = async () => {
         setHasStarted(true);
         try {

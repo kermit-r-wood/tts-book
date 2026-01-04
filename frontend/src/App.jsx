@@ -8,6 +8,7 @@ function App() {
     const [activeChapter, setActiveChapter] = useState(null);
     const [chapters, setChapters] = useState([]);
     const [analysisData, setAnalysisData] = useState({}); // { chapterId: [segments] }
+    const [batchProgress, setBatchProgress] = useState({ percent: 0, message: '', analyzing: false });
 
     return (
         <div className="layout">
@@ -26,6 +27,8 @@ function App() {
                                 chapters={chapters}
                                 setChapters={setChapters}
                                 onSelectChapter={setActiveChapter}
+                                batchProgress={batchProgress}
+                                setBatchProgress={setBatchProgress}
                             />
                         ) : (
                             <ChapterDetail

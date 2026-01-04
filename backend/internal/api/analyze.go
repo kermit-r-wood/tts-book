@@ -266,6 +266,160 @@ func AnalyzeChapter(c *gin.Context) {
 	})
 }
 
+// AnalyzeAllChapters analyzes all chapters sequentially
+func AnalyzeAllChapters(c *gin.Context) {
+	force := c.Query("force") == "true"
+
+	// Get all chapters
+	chapters, ok := LoadedChapters["current"]
+	if !ok || len(chapters) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No book loaded"})
+		return
+	}
+
+	// Start async batch analysis
+	go func() {
+		total := len(chapters)
+		successCount := 0
+		failedChapters := []string{}
+
+		for i, chapter := range chapters {
+			chapterID := chapter.ID
+			chapterTitle := chapter.Title
+			if chapterTitle == "" {
+				chapterTitle = fmt.Sprintf("Chapter %s", chapterID)
+			}
+
+			// Broadcast overall progress
+			overallPercent := int((float64(i) / float64(total)) * 100)
+			BroadcastProgress("batch", overallPercent, fmt.Sprintf("Analyzing %s (%d/%d)...", chapterTitle, i+1, total))
+
+			// Check if already analyzed (and not forcing re-analysis)
+			Store.Mu.RLock()
+			existing, exists := Store.Analysis[chapterID]
+			Store.Mu.RUnlock()
+
+			if exists && len(existing) > 0 && !force {
+				log.Printf("[AnalyzeAll] Skipping already analyzed chapter %s", chapterID)
+				successCount++
+				continue
+			}
+
+			// Analyze this chapter
+			textToAnalyze := chapter.Content
+			if textToAnalyze == "" {
+				log.Printf("[AnalyzeAll] Chapter %s is empty, skipping", chapterID)
+				failedChapters = append(failedChapters, chapterTitle)
+				continue
+			}
+
+			// Initialize LLM Client
+			cfg := config.Get()
+			if cfg.LLMAPIKey == "" {
+				log.Printf("[AnalyzeAll] LLM API Key is missing")
+				BroadcastProgress("batch", 0, "Error: LLM API Key is missing")
+				return
+			}
+
+			client := llm.NewClient(cfg)
+
+			// Chunking text
+			limit := cfg.LLMChunkSize
+			if limit <= 0 {
+				limit = 1000
+			}
+			chunks := SplitText(textToAnalyze, limit)
+			log.Printf("[AnalyzeAll] Chapter %s split into %d chunks\n", chapterID, len(chunks))
+
+			var allResults []llm.AnalysisResult
+			chunkFailed := false
+
+			for j, chunk := range chunks {
+				log.Printf("[AnalyzeAll] Processing chapter %s chunk %d/%d\n", chapterID, j+1, len(chunks))
+
+				results, err := client.AnalyzeTextStream(chunk, func(token string) {
+					BroadcastLLMOutput(chapterID, token)
+				})
+				if err != nil {
+					log.Printf("[AnalyzeAll] Chapter %s chunk %d failed: %v\n", chapterID, j+1, err)
+					failedChapters = append(failedChapters, chapterTitle)
+					chunkFailed = true
+					break
+				}
+
+				allResults = append(allResults, results...)
+			}
+
+			if chunkFailed {
+				continue
+			}
+
+			log.Printf("[AnalyzeAll] Chapter %s analyzed successfully. Found %d segments.\n", chapterID, len(allResults))
+
+			// Auto-assign voices to new characters
+			voiceDir := cfg.VoiceDir
+			if voiceDir == "" {
+				voiceDir = "voices"
+			}
+			availableVoices, err := GetVoicesFromDir(voiceDir)
+			if err != nil {
+				log.Printf("[AnalyzeAll] Warning: Could not list voices from %s: %v", voiceDir, err)
+			}
+
+			// Shuffle voices for random assignment
+			if len(availableVoices) > 0 {
+				rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+				rnd.Shuffle(len(availableVoices), func(i, j int) {
+					availableVoices[i], availableVoices[j] = availableVoices[j], availableVoices[i]
+				})
+			}
+
+			Store.Mu.Lock()
+			Store.Analysis[chapterID] = allResults
+
+			nextVoiceIdx := 0
+			for _, r := range allResults {
+				if r.Speaker != "" {
+					Store.DetectedCharacters[r.Speaker] = true
+
+					// Assign voice if character doesn't have one OR has one with empty VoiceID
+					config, exists := Store.VoiceMapping[r.Speaker]
+					if (!exists || config.VoiceID == "") && len(availableVoices) > 0 {
+						// Pick next voice
+						voicePath := availableVoices[nextVoiceIdx%len(availableVoices)]
+						nextVoiceIdx++
+
+						Store.VoiceMapping[r.Speaker] = VoiceConfig{
+							VoiceID:  filepath.Base(voicePath),
+							RefAudio: voicePath,
+							Emotion:  "calm",
+							Speed:    1.0,
+						}
+						log.Printf("[AnalyzeAll] Auto-assigned voice %s to character %s", filepath.Base(voicePath), r.Speaker)
+					}
+				}
+			}
+			Store.Mu.Unlock()
+
+			// Persist after each chapter
+			if err := Store.Save(); err != nil {
+				log.Printf("[AnalyzeAll] Warning: Failed to save store: %v", err)
+			}
+
+			successCount++
+		}
+
+		// Broadcast completion
+		if len(failedChapters) > 0 {
+			BroadcastProgress("batch", 100, fmt.Sprintf("Completed with errors. %d/%d chapters analyzed. Failed: %s", successCount, total, failedChapters))
+		} else {
+			BroadcastProgress("batch", 100, fmt.Sprintf("All chapters analyzed successfully! (%d/%d)", successCount, total))
+		}
+	}()
+
+	c.JSON(http.StatusOK, gin.H{"status": "started", "totalChapters": len(chapters)})
+}
+
 // SplitText splits a large string into chunks strictly less than limit.
 // It tries to split at paragraph boundaries (\n\n), then sentences (.), then arbitrary.
 func SplitText(text string, limit int) []string {

@@ -25,11 +25,13 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config) {
 		api.POST("/config", UpdateConfig(cfg))
 		api.POST("/upload", UploadEPUB)
 		api.POST("/analyze/:chapterID", AnalyzeChapter)
+		api.POST("/analyze-all", AnalyzeAllChapters)
 
 		api.GET("/characters", GetCharacters)
 		api.POST("/confirm-mapping", ConfirmMapping)
 
 		api.POST("/generate/:chapterID", GenerateAudio)
+		api.GET("/audio-status/:chapterID", GetAudioStatus)
 		api.GET("/browse", BrowseFiles)
 		api.GET("/voices/list", ListConfiguredVoices(cfg))
 		api.GET("/llm/models", ListLLMModels(cfg))

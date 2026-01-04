@@ -15,12 +15,14 @@ export const api = {
     },
 
     analyzeChapter: (chapterId, force = false) => axios.post(`${API_BASE}/analyze/${chapterId}?force=${force}`),
+    analyzeAllChapters: (force = false) => axios.post(`${API_BASE}/analyze-all?force=${force}`),
 
     getCharacters: () => axios.get(`${API_BASE}/characters`),
     confirmMapping: (mapping) => axios.post(`${API_BASE}/confirm-mapping`, mapping),
 
     // Start generation
     generateAudio: (chapterId) => axios.post(`${API_BASE}/generate/${chapterId}`),
+    checkAudioStatus: (chapterId) => axios.get(`${API_BASE}/audio-status/${chapterId}`),
 
     getVoiceList: () => axios.get(`${API_BASE}/voices/list`),
     getLLMModels: () => axios.get(`${API_BASE}/llm/models`),
