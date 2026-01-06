@@ -13,7 +13,11 @@ func GetAudioStatus(c *gin.Context) {
 	chapterID := c.Param("chapterID")
 
 	// Check if audio file exists
-	audioPath := fmt.Sprintf("data/out/%s.wav", chapterID)
+	Store.Mu.RLock()
+	bookID := Store.BookID
+	Store.Mu.RUnlock()
+
+	audioPath := fmt.Sprintf("data/out/%s/%s.wav", bookID, chapterID)
 	_, err := os.Stat(audioPath)
 
 	if os.IsNotExist(err) {
@@ -34,6 +38,6 @@ func GetAudioStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"exists":    true,
 		"chapterId": chapterID,
-		"url":       fmt.Sprintf("/output/%s.wav", chapterID),
+		"url":       fmt.Sprintf("/output/%s/%s.wav", bookID, chapterID),
 	})
 }

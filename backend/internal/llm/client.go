@@ -18,9 +18,10 @@ import (
 )
 
 type AnalysisResult struct {
-	Text    string `json:"text"`
-	Speaker string `json:"speaker"`
-	Emotion string `json:"emotion"`
+	Text        string `json:"text"`
+	Typesetting string `json:"typesetting,omitempty"` // Text with Pinyin annotations for TTS
+	Speaker     string `json:"speaker"`
+	Emotion     string `json:"emotion"`
 }
 
 type Client struct {
@@ -82,84 +83,91 @@ func (c *Client) AnalyzeTextStream(text string, onToken func(string)) ([]Analysi
 	}()
 
 	prompt := `分析提供的文本，并严格将其分割为 JSON 对象列表。
-必须包含输入中的【所有文本】，并保持【原始顺序】。
-不得跳过任何文本，也不得进行摘要。
+	必须包含输入中的【所有文本】，并保持【原始顺序】。
+	返回必须是一个 JSON 对象，包含 "segments" 数组。
 
-关键规则 1：分割对话与旁白
-必须将“角色对话”与“旁白描述”彻底分开。
-即使它们出现在同一段落或同一行中，也必须拆分为不同的片段。
-- 旁白 (Narration)：描述动作、场景或心理活动的文本（如：他说、她想）。Speaker 必须设为 'Narrator'。
-- 对话 (Dialogue)：角色说的话，通常包含在引号中（如 “...” 或 "..."）。Speaker 必须设为角色名称。
+	关键规则 1：【强制】分割对话与旁白 (MANDATORY Split)
+	核心原则：**严禁**在一个 JSON 对象中同时包含引号内的内容（对话）和引号外的内容（旁白）。
+	
+	执行步骤：
+	1. 扫描文本，找到所有的引号（“...” 或 "..."）。
+	2. 将引号内的部分提取为 { "speaker": "角色名", ... }。
+	3. 将引号外的部分（包括描述、动作、标点）提取为 { "speaker": "Narrator", ... }。
+	4. 保持原文的物理顺序。
 
-关键规则 2：严格处理同段落混合文本
-当一段文本中同时包含“旁白前的动作”、“对话”和“对话后的动作”时，必须将其切分为三个独立的 JSON 对象。
-绝对禁止将对话引号外的任何文字（特别是对话后的动作描述）合并到对话内容的 Speaker 中。
+	常见结构处理：
+	1. [动作, 对话]：
+	   原文：他摸了摸她的脸，“你不该挑起这副重担，但你弟弟太小。”
+	   拆分：
+	   - {"text": "他摸了摸她的脸，", "speaker": "Narrator", ...}
+	   - {"text": "“你不该挑起这副重担，但你弟弟太小。”", "speaker": "加伯·蒙洛卡托", ...}
+	   注意：【，】归属旁白。
 
-示例错误处理：
-错误：{"text": "“你不该挑起这副重担。”说完他就死了。", "speaker": "角色名"}
-正确：
-[
-  {"text": "“你不该挑起这副重担。”", "speaker": "角色名"},
-  {"text": "说完他就死了。", "speaker": "Narrator"}
-]
+	2. [对话, 动作]：
+	   原文：“快跑！”他大喊。
+	   拆分：
+	   - {"text": "“快跑！”", "speaker": "角色名", ...}
+	   - {"text": "他大喊。", "speaker": "Narrator", ...}
 
-关键规则 3：多音字拼音标注
-为了修正 TTS (语音合成) 的多音字发音错误，请检测文本中【易读错】的多音字，并将其【替换】为“对应拼音+声调”的格式。
-Index-TTS 支持混合字音输入。
-格式：[大写拼音][数字声调]
-注意：请使用 checkpoints/pinyin.vocab 中支持的拼音组合。
-常见易错示例：
-- "的": 
-  - 结构助词 -> DE5 (如 '漂亮的' -> '漂亮DE5')
-  - '打的' (Taxi) -> '打DI1'
-  - '的确' -> 'DI2确'
-- "得":
-  - 结构助词 (verb+得+adj) -> DE5 (如 '跑得快' -> '跑DE5快')
-  - '不得不' -> '不DEI3不'
-- "地":
-  - 结构助词 (adj+地+verb) -> DE5 (如 '高兴地' -> '高兴DE5')
-- "行":
-  - '不行' -> '不XING2'
-  - '行业' -> 'HANG2业'
-- "着":
-  - '看着' -> '看ZHE5'
-  - '着火' -> 'ZHAO2火'
-- "都":
-  - '都是' -> 'DU1是'
-  - '都市' -> 'DU1市'
+	3. [对话, 动作, 对话] (三明治结构) - **极易出错，请注意**：
+	   原文：“蒙扎，”他会笑眯眯地俯视她，“没有你我该怎么办？”
+	   拆分：
+	   - {"text": "“蒙扎，”", "speaker": "加伯", ...}
+	   - {"text": "他会笑眯眯地俯视她，", "speaker": "Narrator", ...}
+	   - {"text": "“没有你我该怎么办？”", "speaker": "加伯", ...}
 
-关键规则 4：精准识别角色名称 (Contextual Speaker Inference)
-当 Speaker 不明确时，必须根据上下文（Context）推理出具体的角色名称或身份，【严禁】使用“男角色”、“女角色”、“某人”等泛指。
+	- 旁白 (Narrator)：描述动作、场景。Speaker: 'Narrator'。
+	- 对话 (Dialogue)：引号内的内容。Speaker: 角色名称。
 
-推理优先级：
-1. 明确的说话引导语：如 "xxx说"、"xxx道"。
-2. 紧邻的动作执行者：如果对话前没有 "说"，则取上一句动作的主语。
-   例如：“父亲抓住她的手腕……‘对话’” -> Speaker 为 “父亲”。
-3. 上文提及的全名：如果角色在上文中被介绍过（如 “加伯·蒙洛卡托”），且当前被称为 “父亲”，优先使用最具体的名字（本例中 “父亲” 或 “加伯·蒙洛卡托” 均优于 “男角色”）。
+	关键规则 2：Typesetting 字段 (Pinyin Annotation)
+	"typesetting" 字段用于语音合成。
+	1. 【默认行为】：完全复制 "text" 字段的内容。
+	2. 【仅修改多音字】：只有在遇到以下列表中的多音字时，才将其替换为【对应的大写拼音+声调数字】。
+	   【重要】：仅替换多音字字符本身，**严禁**吞掉后面的词。
+	   正确示例： "难产" -> "NAN2产"
+	   错误示例： "难产" -> "NAN2"
+	3. 【严禁】：不要替换非多音字。不要留空。
 
-要求：
-请根据上下文语境，判断多音字的正确读音。
-如果该多音字在 TTS 中容易混淆，请务必将其替换为拼音。
-对于几乎不会读错的固定词组（如“银行”），可以保留汉字。
+	多音字强制替换列表 (Mandatory Pinyin Replacement):
+	- 【行】：XH2 (银行) / XING2 (行为)
+	- 【得】：DEI3 (得去) / DE2 (跑得快) / DE5 (觉得)
+	- 【地】：DI4 (田地) / DE5 (慢慢地)
+	- 【重】：CHONG2 (重新) / ZHONG4 (重要, 重担)
+	- 【着】：ZHAO2 (着火) / ZHE5 (看着) / ZHUO2 (着装)
+	- 【长】：CHANG2 (长短) / ZHANG3 (长大)
+	- 【乐】：LE4 (快乐) / YUE4 (音乐)
+	- 【好】：HAO3 (好人) / HAO4 (爱好)
+	- 【干】：GAN1 (干净) / GAN4 (干活)
+	- 【难】：NAN2 (难产, 困难, 为难) / NAN4 (灾难, 难民)
 
-综合示例：
-输入：
-蒙扎十四岁那年，加伯·蒙洛卡托发起高烧。她和本纳眼睁睁看着他咳嗽。
-某天夜里，父亲抓住她的手腕，盯着她。
-“明天必须给上面的田地松土，尽可能多种些东西。”
+	关键规则 3：精准识别角色 (Contextual Speaker Inference)
+	根据上下文推理角色名称，严禁使用“男角色”、“女角色”。
 
-输出：
-{"segments": [
-  {"text": "蒙扎十四岁那年，加伯·蒙洛卡托发起高烧。她和本纳眼睁睁看着他咳嗽。", "speaker": "Narrator", "emotion": "sad"},
-  {"text": "某天夜里，父亲抓住她的手腕，盯着她。", "speaker": "Narrator", "emotion": "intense"},
-  {"text": "“明天必须给上面的田地松土，尽可能多种些东西。”", "speaker": "加伯·蒙洛卡托", "emotion": "calm"}
-]}
+	示例：
+	输入：
+	他摸了摸她的脸，“你不该挑起这副重担，但你弟弟太小。”
 
-返回一个包含 "segments" 键的 JSON 对象：{"segments": [{"text": "...", "speaker": "...", "emotion": "..."}]}
-重要："segments" 列表必须包含对象，而不是字符串。
-Emotion 必须是以下之一：[happy, angry, sad, afraid, disgusted, melancholic, surprised, calm]。
-默认为 'calm'。
-仅返回严格有效的 JSON。`
+	输出：
+	{
+	  "segments": [
+		{
+		  "text": "他摸了摸她的脸，",
+		  "typesetting": "他摸了摸她的脸，",
+		  "speaker": "Narrator",
+		  "emotion": "calm"
+		},
+		{
+		  "text": "“你不该挑起这副重担，但你弟弟太小。”",
+		  "typesetting": "“你不该挑起这副ZHONG4担，但你弟弟太小。”",
+		  "speaker": "加伯·蒙洛卡托",
+		  "emotion": "sad"
+		}
+	  ]
+	}
+
+	Emotion 必须是以下之一：[happy, angry, sad, afraid, disgusted, melancholic, surprised, calm]。
+	默认为 'calm'。
+	仅返回严格有效的 JSON。`
 
 	maxRetries := 3
 	var lastErr error
@@ -167,16 +175,20 @@ Emotion 必须是以下之一：[happy, angry, sad, afraid, disgusted, melanchol
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		log.Printf("[LLM] Sending Streaming request (Length: %d, Attempt: %d/%d)\n", len(text), attempt, maxRetries)
 
+		// Remove strict JSON enforcement to support "thinking" models that might not support it
+		// or that output text (thoughts) before the JSON.
 		req := openai.ChatCompletionRequest{
 			Model: c.model,
 			Messages: []openai.ChatCompletionMessage{
 				{Role: openai.ChatMessageRoleSystem, Content: prompt},
 				{Role: openai.ChatMessageRoleUser, Content: text},
 			},
-			Stream: true,
-			ResponseFormat: &openai.ChatCompletionResponseFormat{
-				Type: openai.ChatCompletionResponseFormatTypeJSONObject,
-			},
+			Stream:      true,
+			Temperature: 0.1,
+			TopP:        0.1,
+			// ResponseFormat: &openai.ChatCompletionResponseFormat{
+			// 	Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+			// },
 		}
 
 		stream, err := c.api.CreateChatCompletionStream(context.Background(), req)
@@ -220,14 +232,23 @@ Emotion 必须是以下之一：[happy, angry, sad, afraid, disgusted, melanchol
 		content := fullContent.String()
 		log.Printf("[LLM] Full Response Accumulated for Parsing (Attempt %d).\n", attempt)
 
+		// Robust JSON Extraction
+		jsonContent, err := extractJSON(content)
+		if err != nil {
+			log.Printf("[LLM] JSON Extraction Error (Attempt %d): %v. Content: %s\n", attempt, err, content)
+			lastErr = fmt.Errorf("failed to extract JSON: %v", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
 		// Helper struct for JSON Mode response wrapper
 		type responseWrapper struct {
 			Segments []AnalysisResult `json:"segments"`
 		}
 
 		var wrapper responseWrapper
-		if err := json.Unmarshal([]byte(content), &wrapper); err != nil {
-			log.Printf("[LLM] JSON Parse Error (Attempt %d): %v. Content: %s\n", attempt, err, content)
+		if err := json.Unmarshal([]byte(jsonContent), &wrapper); err != nil {
+			log.Printf("[LLM] JSON Parse Error (Attempt %d): %v. Content: %s\n", attempt, err, jsonContent)
 			lastErr = fmt.Errorf("failed to parse LLM JSON: %v. Check log for content", err)
 			time.Sleep(1 * time.Second)
 			continue
@@ -259,4 +280,16 @@ func (c *Client) ListModels() ([]string, error) {
 		models = append(models, m.ID)
 	}
 	return models, nil
+}
+
+// extractJSON attempts to find the first '{' and last '}' to extract the valid JSON object
+func extractJSON(s string) (string, error) {
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+
+	if start == -1 || end == -1 || start > end {
+		return "", fmt.Errorf("no valid JSON object found in response")
+	}
+
+	return s[start : end+1], nil
 }

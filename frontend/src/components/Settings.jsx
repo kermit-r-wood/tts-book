@@ -10,6 +10,7 @@ export default function Settings() {
         index_tts_url: '',
         llm_chunk_size: 1000,
         llm_min_interval: 3000,
+        merge_silence: 400,
         mock_llm: false,
         voice_dir: ''
     });
@@ -27,12 +28,12 @@ export default function Settings() {
             const res = await api.getLLMModels();
             if (res.data.models) {
                 setAvailableModels(res.data.models);
-                setStatus('Models fetched successfully');
+                setStatus('模型获取成功');
                 setTimeout(() => setStatus(''), 2000);
             }
         } catch (e) {
             console.error(e);
-            setStatus('Failed to fetch models');
+            setStatus('模型获取失败');
         } finally {
             setLoadingModels(false);
         }
@@ -41,22 +42,22 @@ export default function Settings() {
     const handleSave = async () => {
         try {
             await api.updateConfig(config);
-            setStatus('Saved successfully!');
+            setStatus('保存成功！');
             setTimeout(() => setStatus(''), 2000);
         } catch (e) {
-            setStatus('Error saving settings');
+            setStatus('保存设置失败');
         }
     };
 
     return (
         <div className="glass-panel p-6">
             <div className="flex items-center gap-2 mb-6 text-xl font-bold text-violet-400">
-                <SettingsIcon /> Settings
+                <SettingsIcon /> 设置
             </div>
 
             <div className="space-y-4">
                 <div>
-                    <label className="block text-sm text-gray-400 mb-1">Index-TTS API URL</label>
+                    <label className="block text-sm text-gray-400 mb-1">Index-TTS API 地址</label>
                     <input
                         className="input-field"
                         value={config.index_tts_url}
@@ -66,17 +67,17 @@ export default function Settings() {
                 </div>
 
                 <div>
-                    <label className="block text-sm text-gray-400 mb-1">Voice Directory (Optional)</label>
+                    <label className="block text-sm text-gray-400 mb-1">语音文件夹 (可选)</label>
                     <input
                         className="input-field"
                         value={config.voice_dir || ''}
                         onChange={e => setConfig({ ...config, voice_dir: e.target.value })}
-                        placeholder="Path to folder with voice files (e.g. C:\Voices)"
+                        placeholder="存放语音文件的文件夹路径 (例如 C:\Voices)"
                     />
                 </div>
 
                 <div>
-                    <label className="block text-sm text-gray-400 mb-1">LLM API Key</label>
+                    <label className="block text-sm text-gray-400 mb-1">大模型 API Key</label>
                     <input
                         className="input-field"
                         type="password"
@@ -87,7 +88,7 @@ export default function Settings() {
                 </div>
 
                 <div>
-                    <label className="block text-sm text-gray-400 mb-1">LLM Base URL</label>
+                    <label className="block text-sm text-gray-400 mb-1">大模型 Base URL</label>
                     <input
                         className="input-field"
                         value={config.llm_base_url || ''}
@@ -97,7 +98,7 @@ export default function Settings() {
                 </div>
 
                 <div>
-                    <label className="block text-sm text-gray-400 mb-1">LLM Model</label>
+                    <label className="block text-sm text-gray-400 mb-1">大模型</label>
                     <div className="flex gap-2">
                         <div className="relative flex-1">
                             {availableModels.length > 0 ? (
@@ -106,7 +107,7 @@ export default function Settings() {
                                     value={config.llm_model || ''}
                                     onChange={e => setConfig({ ...config, llm_model: e.target.value })}
                                 >
-                                    <option value="">Select a model...</option>
+                                    <option value="">选择模型...</option>
                                     {availableModels.map(m => (
                                         <option key={m} value={m}>{m}</option>
                                     ))}
@@ -116,14 +117,14 @@ export default function Settings() {
                                     className="input-field"
                                     value={config.llm_model || ''}
                                     onChange={e => setConfig({ ...config, llm_model: e.target.value })}
-                                    placeholder="Enter model name manually (or click fetch)"
+                                    placeholder="手动输入模型名称 (或点击刷新)"
                                 />
                             )}
                         </div>
                         <button
                             className="btn-secondary px-3"
                             onClick={fetchModels}
-                            title="Fetch available models"
+                            title="刷新可用模型"
                             disabled={loadingModels}
                         >
                             <RefreshCw size={18} className={loadingModels ? "animate-spin" : ""} />
@@ -133,7 +134,7 @@ export default function Settings() {
 
                 <div className="grid grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-sm text-gray-400 mb-1">Max Chunk Size (chars)</label>
+                        <label className="block text-sm text-gray-400 mb-1">最大分块长度 (字符)</label>
                         <input
                             type="number"
                             className="input-field"
@@ -143,13 +144,23 @@ export default function Settings() {
                         />
                     </div>
                     <div>
-                        <label className="block text-sm text-gray-400 mb-1">Min Request Interval (ms)</label>
+                        <label className="block text-sm text-gray-400 mb-1">最小请求间隔 (ms)</label>
                         <input
                             type="number"
                             className="input-field"
                             value={config.llm_min_interval}
                             onChange={e => setConfig({ ...config, llm_min_interval: parseInt(e.target.value) || 0 })}
                             placeholder="3000"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm text-gray-400 mb-1">段落间隔静音 (ms)</label>
+                        <input
+                            type="number"
+                            className="input-field"
+                            value={config.merge_silence}
+                            onChange={e => setConfig({ ...config, merge_silence: parseInt(e.target.value) || 0 })}
+                            placeholder="400"
                         />
                     </div>
                 </div>
@@ -163,12 +174,12 @@ export default function Settings() {
                         className="w-4 h-4 rounded border-gray-600 bg-slate-700 text-violet-500 focus:ring-violet-500"
                     />
                     <label htmlFor="mock_llm" className="text-sm text-gray-300 cursor-pointer select-none">
-                        Enable Mock LLM (Simulate responses, no API cost)
+                        启用模拟大模型 (模拟响应，无 API 消耗)
                     </label>
                 </div>
 
                 <button className="btn-primary w-full justify-center mt-4" onClick={handleSave}>
-                    <Save size={18} /> Save Settings
+                    <Save size={18} /> 保存设置
                 </button>
 
                 {status && <div className="text-center text-sm text-green-400 mt-2">{status}</div>}

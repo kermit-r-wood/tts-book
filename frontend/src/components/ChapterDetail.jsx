@@ -36,7 +36,7 @@ export default function ChapterDetail({ chapter, onBack, analysisData, setAnalys
             setAnalysisData(prev => ({ ...prev, [chapter.id]: res.data.results }));
         } catch (e) {
             console.error(e);
-            alert('Analysis failed');
+            alert('分析失败');
         } finally {
             setAnalyzing(false);
         }
@@ -61,21 +61,21 @@ export default function ChapterDetail({ chapter, onBack, analysisData, setAnalys
                     className={`px-6 py-3 font-medium flex items-center gap-2 border-b-2 transition-colors ${activeTab === 'analyze' ? 'border-violet-500 text-violet-400' : 'border-transparent text-gray-400 hover:text-white'}`}
                     onClick={() => setActiveTab('analyze')}
                 >
-                    <FileText size={18} /> Analyze
+                    <FileText size={18} /> 文本分析
                 </button>
                 <button
                     className={`px-6 py-3 font-medium flex items-center gap-2 border-b-2 transition-colors ${activeTab === 'voices' ? 'border-violet-500 text-violet-400' : 'border-transparent text-gray-400 hover:text-white'}`}
                     onClick={() => setActiveTab('voices')}
                     disabled={!hasAnalysis}
                 >
-                    <User size={18} /> Voices
+                    <User size={18} /> 角色配音
                 </button>
                 <button
                     className={`px-6 py-3 font-medium flex items-center gap-2 border-b-2 transition-colors ${activeTab === 'audio' ? 'border-violet-500 text-violet-400' : 'border-transparent text-gray-400 hover:text-white'}`}
                     onClick={() => setActiveTab('audio')}
                     disabled={!hasAnalysis} // Technically need analysis first? Yes usually.
                 >
-                    <Play size={18} /> Audio
+                    <Play size={18} /> 合成音频
                 </button>
             </div>
 
@@ -86,13 +86,13 @@ export default function ChapterDetail({ chapter, onBack, analysisData, setAnalys
                         {/* Left: Actions & Status */}
                         <div className="space-y-6">
                             <div className="glass-panel p-6">
-                                <h3 className="text-lg font-bold mb-4">Analysis Status</h3>
+                                <h3 className="text-lg font-bold mb-4">分析状态</h3>
                                 {hasAnalysis ? (
                                     <div className="flex items-center gap-2 text-green-400 mb-4">
-                                        <CheckCircle /> Analysis Complete
+                                        <CheckCircle /> 分析完成
                                     </div>
                                 ) : (
-                                    <p className="text-gray-400 mb-4">Run analysis to identify characters and split text.</p>
+                                    <p className="text-gray-400 mb-4">运行分析以识别角色并拆分文本</p>
                                 )}
 
                                 <div className="space-y-3">
@@ -102,7 +102,7 @@ export default function ChapterDetail({ chapter, onBack, analysisData, setAnalys
                                         className={`btn-primary w-full flex justify-center items-center gap-2 ${analyzing ? 'opacity-50' : ''}`}
                                     >
                                         <Activity className={analyzing ? 'animate-spin' : ''} />
-                                        {analyzing ? 'Analyzing...' : (hasAnalysis ? 'Re-Analyze (Cached)' : 'Start Analysis')}
+                                        {analyzing ? '正在分析...' : (hasAnalysis ? '重新分析 (缓存)' : '开始分析')}
                                     </button>
 
                                     {hasAnalysis && (
@@ -111,7 +111,7 @@ export default function ChapterDetail({ chapter, onBack, analysisData, setAnalys
                                             disabled={analyzing}
                                             className="w-full py-2 text-sm text-red-400 hover:text-red-300 hover:bg-white/5 rounded transition-colors flex justify-center items-center gap-2"
                                         >
-                                            Force Re-Analyze (Overwrite)
+                                            强制重新分析 (覆盖)
                                         </button>
                                     )}
                                 </div>
@@ -120,13 +120,46 @@ export default function ChapterDetail({ chapter, onBack, analysisData, setAnalys
                             {/* Text Preview or Stream */}
                             <div className="glass-panel p-6 flex flex-col h-[500px]">
                                 <h3 className="text-lg font-bold mb-2 flex justify-between">
-                                    <span>{analyzing ? 'Thinking...' : 'Raw Text Preview'}</span>
+                                    <span>{analyzing ? '思考中...' : '原文预览'}</span>
                                     {analyzing && <Activity className="animate-spin text-violet-400" size={18} />}
                                 </h3>
 
                                 {analyzing || streamOutput ? (
-                                    <div className="flex-1 bg-black/50 rounded-lg p-4 font-mono text-xs text-green-400 overflow-y-auto custom-scrollbar whitespace-pre-wrap">
-                                        {streamOutput || <span className="text-gray-500 animate-pulse">Waiting for DeepSeek...</span>}
+                                    <div className="flex-1 bg-black/50 rounded-lg p-4 overflow-y-auto custom-scrollbar whitespace-pre-wrap flex flex-col gap-2">
+                                        {(() => {
+                                            const output = streamOutput || '';
+                                            const thinkStart = output.indexOf('<think>');
+                                            const thinkEnd = output.indexOf('</think>');
+
+                                            let thinkContent = '';
+                                            let mainContent = output;
+
+                                            if (thinkStart !== -1) {
+                                                if (thinkEnd !== -1) {
+                                                    // Complete think block
+                                                    thinkContent = output.substring(thinkStart + 7, thinkEnd);
+                                                    mainContent = output.substring(0, thinkStart) + output.substring(thinkEnd + 8);
+                                                } else {
+                                                    // Open think block (streaming)
+                                                    thinkContent = output.substring(thinkStart + 7);
+                                                    mainContent = output.substring(0, thinkStart);
+                                                }
+                                            }
+
+                                            return (
+                                                <>
+                                                    {thinkContent && (
+                                                        <div className="bg-gray-800/50 border-l-2 border-violet-500/50 p-3 rounded text-xs text-gray-400 font-mono italic mb-2">
+                                                            <div className="font-bold text-violet-400 mb-1 not-italic">Thinking Process:</div>
+                                                            {thinkContent}
+                                                        </div>
+                                                    )}
+                                                    <div className="font-mono text-xs text-green-400">
+                                                        {mainContent || (analyzing && !thinkContent && <span className="text-gray-500 animate-pulse">等待大模型响应...</span>)}
+                                                    </div>
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                 ) : (
                                     <div className="flex-1 overflow-y-auto text-sm text-gray-400 font-serif leading-relaxed pr-2 custom-scrollbar">
@@ -139,7 +172,7 @@ export default function ChapterDetail({ chapter, onBack, analysisData, setAnalys
                         {/* Right: Results */}
                         <div className="glass-panel p-6 flex flex-col h-full max-h-[700px]">
                             <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-                                <Activity size={18} /> Analysis Results
+                                <Activity size={18} /> 分析结果
                             </h3>
                             {hasAnalysis ? (
                                 <div className="space-y-3 overflow-y-auto flex-1 pr-2 custom-scrollbar">
@@ -157,7 +190,7 @@ export default function ChapterDetail({ chapter, onBack, analysisData, setAnalys
                                 </div>
                             ) : (
                                 <div className="flex-1 flex items-center justify-center text-gray-500 italic">
-                                    No analysis data yet.
+                                    暂无分析数据
                                 </div>
                             )}
                         </div>

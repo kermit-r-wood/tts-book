@@ -86,27 +86,56 @@ func ListConfiguredVoices(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
-		// Convert to absolute paths for consistency if needed,
-		// but GetVoicesFromDir currently joins with dirKey.
-		// Let's ensure they are usable.
-		// Also, frontend might want clean names.
-		// For now, let's return the full paths as the ID.
-		// And maybe we can return a list of objects {name, path}?
-		// The requirement says "provide dropdown, choose ... in folder".
-		// The "GetVoicesFromDir" just returns strings.
-		// Let's improve the response to include names.
-
 		type VoiceOption struct {
 			Name string `json:"name"`
 			Path string `json:"path"`
 		}
 		var options []VoiceOption
 		for _, v := range voices {
+			absPath, err := filepath.Abs(v)
+			if err != nil {
+				absPath = v // Fallback
+			}
 			options = append(options, VoiceOption{
 				Name: filepath.Base(v),
-				Path: v,
+				Path: absPath,
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"voices": options})
 	}
+}
+
+// PreviewVoice serves the audio file for preview
+func PreviewVoice(c *gin.Context) {
+	path := c.Query("path")
+	if path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Path is required"})
+		return
+	}
+
+	// Basic security check: ensure it exists and is a file
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) || info.IsDir() {
+		fmt.Printf("[PreviewVoice] File not found or is dir: %s\n", path)
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	fmt.Printf("[PreviewVoice] Serving file: %s\n", path)
+
+	// Set content type
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".wav":
+		c.Header("Content-Type", "audio/wav")
+	case ".mp3":
+		c.Header("Content-Type", "audio/mpeg")
+	case ".ogg":
+		c.Header("Content-Type", "audio/ogg")
+	case ".flac":
+		c.Header("Content-Type", "audio/flac")
+	}
+
+	// Serve the file
+	c.File(path)
 }

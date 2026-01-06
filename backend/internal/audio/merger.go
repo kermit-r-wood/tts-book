@@ -9,7 +9,7 @@ import (
 
 // MergeWavFiles concatenates multiple WAV files into a single output file.
 // It assumes all input files have the same format (sample rate, channels, bit depth).
-func MergeWavFiles(inputs []string, outputPath string) error {
+func MergeWavFiles(inputs []string, outputPath string, silenceMs int) error {
 	if len(inputs) == 0 {
 		return fmt.Errorf("no input files to merge")
 	}
@@ -32,6 +32,22 @@ func MergeWavFiles(inputs []string, outputPath string) error {
 		return fmt.Errorf("failed to read header from %s: %w", inputs[0], err)
 	}
 
+	// Parse header to calculate silence bytes
+	numChannels := binary.LittleEndian.Uint16(header[22:24])
+	sampleRate := binary.LittleEndian.Uint32(header[24:28])
+	bitsPerSample := binary.LittleEndian.Uint16(header[34:36])
+	byteRate := uint32(sampleRate) * uint32(numChannels) * uint32(bitsPerSample/8)
+
+	// Calculate silence buffer size
+	silenceBytes := (byteRate * uint32(silenceMs)) / 1000
+	// Ensure alignment to block align (channels * bytesPerSample)
+	blockAlign := uint32(numChannels * (bitsPerSample / 8))
+	if silenceBytes%blockAlign != 0 {
+		silenceBytes += blockAlign - (silenceBytes % blockAlign)
+	}
+
+	silenceBuffer := make([]byte, silenceBytes) // Zero-filled by default
+
 	// Write placeholder header to output (will update sizes later)
 	if _, err := outFile.Write(header); err != nil {
 		return fmt.Errorf("failed to write header: %w", err)
@@ -39,13 +55,19 @@ func MergeWavFiles(inputs []string, outputPath string) error {
 
 	totalDataSize := uint32(0)
 
-	// 2. Append data from all files (including the first one's body)
-	// We need to re-read the first file's body, so we can just loop through inputs.
-	// But for the first file, we already read the header.
-	// Easier: Close firstFile and loop all fresh.
-	firstFile.Close()
+	// 2. Append data from all files
+	firstFile.Close() // Close re-opened first file
 
-	for _, inputPath := range inputs {
+	for i, inputPath := range inputs {
+		// Insert silence before every file except the first one
+		if i > 0 && silenceMs > 0 {
+			n, err := outFile.Write(silenceBuffer)
+			if err != nil {
+				return fmt.Errorf("failed to write silence: %w", err)
+			}
+			totalDataSize += uint32(n)
+		}
+
 		f, err := os.Open(inputPath)
 		if err != nil {
 			return fmt.Errorf("failed to open %s: %w", inputPath, err)

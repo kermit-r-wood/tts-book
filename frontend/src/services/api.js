@@ -25,5 +25,6 @@ export const api = {
     checkAudioStatus: (chapterId) => axios.get(`${API_BASE}/audio-status/${chapterId}`),
 
     getVoiceList: () => axios.get(`${API_BASE}/voices/list`),
+    getVoicePreviewUrl: (path) => `${API_BASE}/voices/preview?path=${encodeURIComponent(path)}`,
     getLLMModels: () => axios.get(`${API_BASE}/llm/models`),
 };

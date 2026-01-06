@@ -16,7 +16,7 @@ export default function ChapterList({ chapters, setChapters, onSelectChapter, ba
             setChapters(res.data.chapters);
         } catch (err) {
             console.error(err);
-            alert('Upload failed');
+            alert('上传失败');
         } finally {
             setUploading(false);
         }
@@ -51,17 +51,17 @@ export default function ChapterList({ chapters, setChapters, onSelectChapter, ba
 
     const handleAnalyzeAll = async () => {
         if (chapters.length === 0) {
-            alert('No chapters to analyze');
+            alert('没有可分析的章节');
             return;
         }
 
-        setBatchProgress({ percent: 0, message: 'Starting batch analysis...', analyzing: true });
+        setBatchProgress({ percent: 0, message: '正在开始批量分析...', analyzing: true });
 
         try {
             await api.analyzeAllChapters(false);
         } catch (err) {
             console.error(err);
-            alert('Batch analysis failed to start');
+            alert('批量分析启动失败');
             setBatchProgress({ percent: 0, message: '', analyzing: false });
         }
     };
@@ -70,8 +70,8 @@ export default function ChapterList({ chapters, setChapters, onSelectChapter, ba
         <div className="space-y-6">
             <div className="glass-panel p-8 text-center border-dashed border-2 border-gray-600 hover:border-violet-500 transition-colors">
                 <Upload className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                <h3 className="text-lg font-medium text-white">Upload EPUB</h3>
-                <p className="text-gray-400 mt-2 mb-6">Drag and drop or click to browse</p>
+                <h3 className="text-lg font-medium text-white">上传电子书 (.epub)</h3>
+                <p className="text-gray-400 mt-2 mb-6">拖拽文件至此 或 点击选择文件</p>
                 <input
                     type="file"
                     accept=".epub"
@@ -80,27 +80,27 @@ export default function ChapterList({ chapters, setChapters, onSelectChapter, ba
                     id="epub-upload"
                 />
                 <label htmlFor="epub-upload" className="btn-primary">
-                    Select File
+                    选择文件
                 </label>
-                {uploading && <div className="mt-4 text-violet-400">Uploading and Parsing...</div>}
+                {uploading && <div className="mt-4 text-violet-400">上传并解析中...</div>}
             </div>
 
             {chapters.length > 0 && (
                 <div className="glass-panel p-6">
                     <div className="flex items-center justify-between mb-4">
                         <h3 className="text-xl font-bold flex items-center gap-2">
-                            <Sparkles /> Batch Analysis
+                            <Sparkles /> 批量分析
                         </h3>
                     </div>
                     <p className="text-gray-400 text-sm mb-4">
-                        Analyze all chapters sequentially using LLM to detect characters and emotions.
+                        使用大模型按顺序分析所有章节，识别角色和情感。
                     </p>
                     <button
                         onClick={handleAnalyzeAll}
                         disabled={batchProgress.analyzing}
                         className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        {batchProgress.analyzing ? 'Analyzing...' : 'Analyze All Chapters'}
+                        {batchProgress.analyzing ? '正在分析...' : '分析所有章节'}
                     </button>
                     {batchProgress.analyzing && (
                         <div className="mt-4">
@@ -122,7 +122,7 @@ export default function ChapterList({ chapters, setChapters, onSelectChapter, ba
             {chapters.length > 0 && (
                 <div className="glass-panel p-6">
                     <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-                        <FileText /> Chapters
+                        <FileText /> 章节列表
                     </h3>
                     <div className="space-y-2 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
                         {chapters.map((ch) => (
@@ -131,7 +131,7 @@ export default function ChapterList({ chapters, setChapters, onSelectChapter, ba
                                 onClick={() => onSelectChapter(ch)}
                                 className="w-full flex justify-between items-center p-4 bg-gray-800/50 rounded-lg hover:bg-gray-800 border border-transparent hover:border-violet-500/50 transition-all group text-left"
                             >
-                                <span className="truncate flex-1 font-medium text-lg">{ch.title || `Chapter ${ch.id}`}</span>
+                                <span className="truncate flex-1 font-medium text-lg">{ch.title || `第 ${ch.id} 章`}</span>
                                 <ChevronRight className="text-gray-500 group-hover:text-violet-400" />
                             </button>
                         ))}

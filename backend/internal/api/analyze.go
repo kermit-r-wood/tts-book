@@ -25,6 +25,7 @@ func GenerateAudio(c *gin.Context) {
 
 	Store.Mu.RLock()
 	segments, ok := Store.Analysis[chapterID]
+	bookID := Store.BookID
 	// mapping := Store.VoiceMapping // Copy if needed
 	Store.Mu.RUnlock()
 
@@ -44,7 +45,9 @@ func GenerateAudio(c *gin.Context) {
 		// Prepare temp dir
 		tempDir := fmt.Sprintf("data/temp/%s", chapterID)
 		os.MkdirAll(tempDir, 0755)
-		os.MkdirAll("data/out", 0755) // Ensure output dir exists
+
+		outDir := fmt.Sprintf("data/out/%s", bookID)
+		os.MkdirAll(outDir, 0755) // Ensure output dir exists
 
 		total := len(segments)
 		var filePaths []string
@@ -83,7 +86,13 @@ func GenerateAudio(c *gin.Context) {
 			}
 			BroadcastProgress(chapterID, int((float64(i)/float64(total))*100), fmt.Sprintf("Generating (%d/%d): %s...", i+1, total, display))
 
-			audioData, err := ttsClient.Generate(seg.Text, voice, emotion, speed)
+			textToSpeak := seg.Typesetting
+			if textToSpeak == "" {
+				textToSpeak = seg.Text
+			}
+
+			log.Printf("[TTS] Generating segment %d with text: %s", i, textToSpeak) // Debug Log
+			audioData, err := ttsClient.Generate(textToSpeak, voice, emotion, speed)
 			if err != nil {
 				log.Printf("[TTS] Error generating segment %d: %v", i, err)
 				// Continue? Or Fail? Let's continue and skip for robustness, or fail.
@@ -103,9 +112,9 @@ func GenerateAudio(c *gin.Context) {
 
 		// Merge
 		BroadcastProgress(chapterID, 95, "Merging Audio Files...")
-		outPath := fmt.Sprintf("data/out/%s.wav", chapterID)
+		outPath := fmt.Sprintf("%s/%s.wav", outDir, chapterID)
 
-		if err := audio.MergeWavFiles(filePaths, outPath); err != nil {
+		if err := audio.MergeWavFiles(filePaths, outPath, cfg.MergeSilence); err != nil {
 			log.Printf("[TTS] Merge failed: %v", err)
 			BroadcastProgress(chapterID, 0, fmt.Sprintf("Merge Error: %v", err))
 			return
