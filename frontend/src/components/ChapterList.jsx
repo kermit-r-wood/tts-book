@@ -4,6 +4,7 @@ import { Upload, FileText, ChevronRight, Sparkles } from 'lucide-react';
 
 export default function ChapterList({ chapters, setChapters, onSelectChapter, batchProgress, setBatchProgress }) {
     const [uploading, setUploading] = useState(false);
+    const [forceBatch, setForceBatch] = useState(false);
     const wsRef = useRef(null);
 
     const handleUpload = async (e) => {
@@ -58,7 +59,7 @@ export default function ChapterList({ chapters, setChapters, onSelectChapter, ba
         setBatchProgress({ percent: 0, message: '正在开始批量分析...', analyzing: true });
 
         try {
-            await api.analyzeAllChapters(false);
+            await api.analyzeAllChapters(forceBatch);
         } catch (err) {
             console.error(err);
             alert('批量分析启动失败');
@@ -102,6 +103,20 @@ export default function ChapterList({ chapters, setChapters, onSelectChapter, ba
                     >
                         {batchProgress.analyzing ? '正在分析...' : '分析所有章节'}
                     </button>
+
+                    <div className="mt-3 flex items-center justify-center gap-2">
+                        <input
+                            type="checkbox"
+                            id="forceBatch"
+                            checked={forceBatch}
+                            onChange={(e) => setForceBatch(e.target.checked)}
+                            disabled={batchProgress.analyzing}
+                            className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-violet-500 focus:ring-violet-500/50"
+                        />
+                        <label htmlFor="forceBatch" className="text-sm text-gray-400 select-none cursor-pointer">
+                            强制重新分析 (覆盖已有数据)
+                        </label>
+                    </div>
                     {batchProgress.analyzing && (
                         <div className="mt-4">
                             <div className="flex justify-between text-sm text-gray-400 mb-2">

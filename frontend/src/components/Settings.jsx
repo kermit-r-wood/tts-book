@@ -7,6 +7,7 @@ export default function Settings() {
         llm_api_key: '',
         llm_base_url: '',
         llm_model: '',
+        llm_provider: 'openai',
         index_tts_url: '',
         llm_chunk_size: 1000,
         llm_min_interval: 3000,
@@ -77,6 +78,18 @@ export default function Settings() {
                 </div>
 
                 <div>
+                    <label className="block text-sm text-gray-400 mb-1">API Provider</label>
+                    <select
+                        className="input-field appearance-none"
+                        value={config.llm_provider || 'openai'}
+                        onChange={e => setConfig({ ...config, llm_provider: e.target.value })}
+                    >
+                        <option value="openai">OpenAI Compatible (ChatGPT, DeepSeek, etc.)</option>
+                        <option value="gemini">Google Gemini (Native)</option>
+                    </select>
+                </div>
+
+                <div>
                     <label className="block text-sm text-gray-400 mb-1">大模型 API Key</label>
                     <input
                         className="input-field"
@@ -87,15 +100,19 @@ export default function Settings() {
                     />
                 </div>
 
-                <div>
-                    <label className="block text-sm text-gray-400 mb-1">大模型 Base URL</label>
-                    <input
-                        className="input-field"
-                        value={config.llm_base_url || ''}
-                        onChange={e => setConfig({ ...config, llm_base_url: e.target.value })}
-                        placeholder="https://api..."
-                    />
-                </div>
+
+
+                {config.llm_provider === 'openai' && (
+                    <div>
+                        <label className="block text-sm text-gray-400 mb-1">大模型 Base URL</label>
+                        <input
+                            className="input-field"
+                            value={config.llm_base_url || ''}
+                            onChange={e => setConfig({ ...config, llm_base_url: e.target.value })}
+                            placeholder="https://api..."
+                        />
+                    </div>
+                )}
 
                 <div>
                     <label className="block text-sm text-gray-400 mb-1">大模型</label>
@@ -184,6 +201,6 @@ export default function Settings() {
 
                 {status && <div className="text-center text-sm text-green-400 mt-2">{status}</div>}
             </div>
-        </div>
+        </div >
     );
 }

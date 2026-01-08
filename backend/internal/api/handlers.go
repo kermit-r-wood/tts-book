@@ -31,6 +31,8 @@ func UpdateConfig(cfg *config.Config) gin.HandlerFunc {
 		cfg.LLMChunkSize = newCfg.LLMChunkSize
 		cfg.LLMMinInterval = newCfg.LLMMinInterval
 		cfg.MockLLM = newCfg.MockLLM
+		cfg.LLMProvider = newCfg.LLMProvider
+		cfg.MergeSilence = newCfg.MergeSilence
 
 		// Save
 		if err := cfg.Save(); err != nil {

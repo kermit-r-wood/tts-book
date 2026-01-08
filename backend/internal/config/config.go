@@ -10,6 +10,7 @@ type Config struct {
 	LLMAPIKey      string `json:"llm_api_key"`
 	LLMBaseURL     string `json:"llm_base_url"`
 	LLMModel       string `json:"llm_model"`        // Default "ZhipuAI/GLM-4.7"
+	LLMProvider    string `json:"llm_provider"`     // "openai" or "gemini"
 	LLMChunkSize   int    `json:"llm_chunk_size"`   // Default 1000
 	LLMMinInterval int    `json:"llm_min_interval"` // Default 3000 ms
 	MockLLM        bool   `json:"mock_llm"`         // Mock LLM responses
@@ -32,7 +33,8 @@ func Load() *Config {
 		instance = &Config{
 			LLMBaseURL:     "https://api-inference.modelscope.cn/v1", // DeepSeek on ModelScope
 			LLMModel:       "ZhipuAI/GLM-4.7",
-			LLMChunkSize:   1000,
+			LLMProvider:    "openai",
+			LLMChunkSize:   800,
 			LLMMinInterval: 3000,
 			MergeSilence:   400,                     // Default 400ms silence between segments
 			IndexTTSUrl:    "http://127.0.0.1:7860", // Default

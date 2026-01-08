@@ -184,7 +184,16 @@ export default function ChapterDetail({ chapter, onBack, analysisData, setAnalys
                                                 </span>
                                                 <span className="text-xs text-gray-500">{seg.emotion}</span>
                                             </div>
-                                            <p className="text-gray-300">{seg.text}</p>
+                                            <p className="text-gray-300 mb-1">{seg.text}</p>
+                                            {// Display typesetting if it exists and is different from text (or always, depending on user need. 
+                                                // User asked to 'show typesetting', likely to check pinyin.)
+                                                seg.typesetting && (
+                                                    <div className="mt-1 text-xs text-gray-500 font-mono border-t border-gray-700/50 pt-1">
+                                                        <span className="select-none text-gray-600 mr-2">Typesetting:</span>
+                                                        <span className="text-violet-300">{seg.typesetting}</span>
+                                                    </div>
+                                                )
+                                            }
                                         </div>
                                     ))}
                                 </div>
