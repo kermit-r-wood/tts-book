@@ -18,6 +18,102 @@ import (
 	"google.golang.org/genai"
 )
 
+const systemPrompt = `
+	分析提供的文本，并严格将其分割为 JSON 对象列表。
+	必须包含输入中的【所有文本】，并保持【原始顺序】。
+	返回必须是一个 JSON 对象，包含 "segments" 数组。
+
+	关键规则 1：【强制】分割对话与旁白 (MANDATORY Split)
+	核心原则：**严禁**在一个 JSON 对象中同时包含引号内的内容（对话）和引号外的内容（旁白）。
+	
+	执行步骤：
+	1. 扫描文本，找到所有的引号（“...” 或 "..."）。
+	2. 将引号内的部分提取为 { "speaker": "角色名", ... }。
+	3. 将引号外的部分（包括描述、动作、标点）提取为 { "speaker": "Narrator", ... }。
+	4. 保持原文的物理顺序。
+
+	常见结构处理：
+	1. [动作, 对话]：
+	   原文：他摸了摸她的脸，“你不该挑起这副重担，但你弟弟太小。”
+	   拆分：
+	   - {"text": "他摸了摸她的脸，", "speaker": "Narrator", ...}
+	   - {"text": "“你不该挑起这副重担，但你弟弟太小。”", "speaker": "加伯·蒙洛卡托", ...}
+	   注意：【，】归属旁白。
+
+	2. [对话, 动作]：
+	   原文：“快跑！”他大喊。
+	   拆分：
+	   - {"text": "“快跑！”", "speaker": "角色名", ...}
+	   - {"text": "他大喊。", "speaker": "Narrator", ...}
+
+	3. [对话, 动作, 对话] (三明治结构)：
+	   原文：“蒙扎，”他会笑眯眯地俯视她，“没有你我该怎么办？”
+	   拆分：
+	   - {"text": "“蒙扎，”", "speaker": "加伯", ...}
+	   - {"text": "他会笑眯眯地俯视她，", "speaker": "Narrator", ...}
+	   - {"text": "“没有你我该怎么办？”", "speaker": "加伯", ...}
+
+	4. [复杂交替] (Complex Interleaved):
+	   原文：她叹了口气，“事实就是事实。”她在马鞍上伸个懒腰，“不过，我爱听。”
+	   拆分：
+	   - {"text": "她叹了口气，", "speaker": "Narrator"} (动作指示主体)
+	   - {"text": "“事实就是事实。”", "speaker": "她(角色名)", "emotion": "melancholic"} (由叹气推断)
+	   - {"text": "她在马鞍上伸个懒腰，", "speaker": "Narrator"}
+	   - {"text": "“不过，我爱听。”", "speaker": "她(角色名)", "emotion": "calm"} (由伸懒腰恢复平静)
+
+	- 旁白 (Narrator)：描述动作、场景。Speaker: 'Narrator'。
+	- 对话 (Dialogue)：引号内的内容。Speaker: 角色名称。
+
+	关键规则 2：Typesetting 字段 (Pinyin Annotation)
+	"typesetting" 字段用于语音合成。
+	1. 【默认行为】：完全复制 "text" 字段的内容。
+	2. 【仅修改多音字】：只有在遇到以下列表中的多音字时，才将其替换为【对应的大写拼音+声调数字】。
+	   【重要】：仅替换多音字字符本身，**严禁**吞掉后面的词。
+	   正确示例： "难产" -> "NAN2产"
+	   错误示例： "难产" -> "NAN2"
+	3. 【严禁】：不要替换非多音字。不要留空。
+
+	多音字强制替换列表 (Mandatory Pinyin Replacement):
+	- 【行】：XH2 (银行) / XING2 (行为)
+	- 【得】：DEI3 (得去) / DE2 (跑得快) / DE5 (觉得)
+	- 【地】：DI4 (田地) / DE5 (慢慢地)
+	- 【重】：CHONG2 (重新) / ZHONG4 (重要, 重担)
+	- 【着】：ZHAO2 (着火) / ZHE5 (看着) / ZHUO2 (着装)
+	- 【长】：CHANG2 (长短) / ZHANG3 (长大)
+	- 【乐】：LE4 (快乐) / YUE4 (音乐)
+	- 【好】：HAO3 (好人) / HAO4 (爱好)
+	- 【干】：GAN1 (干净) / GAN4 (干活)
+	- 【难】：NAN2 (难产, 困难, 为难) / NAN4 (灾难, 难民)
+
+	关键规则 3：精准识别角色 (Contextual Speaker Inference)
+	根据上下文推理角色名称，严禁使用“男角色”、“女角色”。
+
+	示例：
+	输入：
+	他摸了摸她的脸，“你不该挑起这副重担，但你弟弟太小。”
+
+	输出：
+	{
+	  "segments": [
+		{
+		  "text": "他摸了摸她的脸，",
+		  "typesetting": "他摸了摸她的脸，",
+		  "speaker": "Narrator",
+		  "emotion": "calm"
+		},
+		{
+		  "text": "“你不该挑起这副重担，但你弟弟太小。”",
+		  "typesetting": "“你不该挑起这副ZHONG4担，但你弟弟太小。”",
+		  "speaker": "加伯·蒙洛卡托",
+		  "emotion": "sad"
+		}
+	  ]
+	}
+
+	Emotion 必须是以下之一：[happy, angry, sad, afraid, disgusted, melancholic, surprised, calm]。
+	默认为 'calm'。
+	仅返回严格有效的 JSON。`
+
 type AnalysisResult struct {
 	Text        string `json:"text"`
 	Typesetting string `json:"typesetting,omitempty"` // Text with Pinyin annotations for TTS
@@ -45,7 +141,6 @@ func NewClient(cfg *config.Config) *Client {
 		api:         openai.NewClientWithConfig(c),
 		minInterval: time.Duration(cfg.LLMMinInterval) * time.Millisecond,
 		isMock:      cfg.MockLLM,
-		model:       cfg.LLMModel,
 		provider:    cfg.LLMProvider,
 		apiKey:      cfg.LLMAPIKey,
 	}
@@ -108,110 +203,21 @@ func (c *Client) AnalyzeTextStream(text string, onToken func(string)) ([]Analysi
 		c.mu.Unlock()
 	}()
 
-	prompt := `分析提供的文本，并严格将其分割为 JSON 对象列表。
-	必须包含输入中的【所有文本】，并保持【原始顺序】。
-	返回必须是一个 JSON 对象，包含 "segments" 数组。
-
-	关键规则 1：【强制】分割对话与旁白 (MANDATORY Split)
-	核心原则：**严禁**在一个 JSON 对象中同时包含引号内的内容（对话）和引号外的内容（旁白）。
-	
-	执行步骤：
-	1. 扫描文本，找到所有的引号（“...” 或 "..."）。
-	2. 将引号内的部分提取为 { "speaker": "角色名", ... }。
-	3. 将引号外的部分（包括描述、动作、标点）提取为 { "speaker": "Narrator", ... }。
-	4. 保持原文的物理顺序。
-
-	常见结构处理：
-	1. [动作, 对话]：
-	   原文：他摸了摸她的脸，“你不该挑起这副重担，但你弟弟太小。”
-	   拆分：
-	   - {"text": "他摸了摸她的脸，", "speaker": "Narrator", ...}
-	   - {"text": "“你不该挑起这副重担，但你弟弟太小。”", "speaker": "加伯·蒙洛卡托", ...}
-	   注意：【，】归属旁白。
-
-	2. [对话, 动作]：
-	   原文：“快跑！”他大喊。
-	   拆分：
-	   - {"text": "“快跑！”", "speaker": "角色名", ...}
-	   - {"text": "他大喊。", "speaker": "Narrator", ...}
-
-	3. [对话, 动作, 对话] (三明治结构) - **极易出错，请注意**：
-	   原文：“蒙扎，”他会笑眯眯地俯视她，“没有你我该怎么办？”
-	   拆分：
-	   - {"text": "“蒙扎，”", "speaker": "加伯", ...}
-	   - {"text": "他会笑眯眯地俯视她，", "speaker": "Narrator", ...}
-	   - {"text": "“没有你我该怎么办？”", "speaker": "加伯", ...}
-
-	- 旁白 (Narrator)：描述动作、场景。Speaker: 'Narrator'。
-	- 对话 (Dialogue)：引号内的内容。Speaker: 角色名称。
-
-	关键规则 2：Typesetting 字段 (Pinyin Annotation)
-	"typesetting" 字段用于语音合成。
-	1. 【默认行为】：完全复制 "text" 字段的内容。
-	2. 【仅修改多音字】：只有在遇到以下列表中的多音字时，才将其替换为【对应的大写拼音+声调数字】。
-	   【重要】：仅替换多音字字符本身，**严禁**吞掉后面的词。
-	   正确示例： "难产" -> "NAN2产"
-	   错误示例： "难产" -> "NAN2"
-	3. 【严禁】：不要替换非多音字。不要留空。
-
-	多音字强制替换列表 (Mandatory Pinyin Replacement):
-	- 【行】：XH2 (银行) / XING2 (行为)
-	- 【得】：DEI3 (得去) / DE2 (跑得快) / DE5 (觉得)
-	- 【地】：DI4 (田地) / DE5 (慢慢地)
-	- 【重】：CHONG2 (重新) / ZHONG4 (重要, 重担)
-	- 【着】：ZHAO2 (着火) / ZHE5 (看着) / ZHUO2 (着装)
-	- 【长】：CHANG2 (长短) / ZHANG3 (长大)
-	- 【乐】：LE4 (快乐) / YUE4 (音乐)
-	- 【好】：HAO3 (好人) / HAO4 (爱好)
-	- 【干】：GAN1 (干净) / GAN4 (干活)
-	- 【难】：NAN2 (难产, 困难, 为难) / NAN4 (灾难, 难民)
-
-	关键规则 3：精准识别角色 (Contextual Speaker Inference)
-	根据上下文推理角色名称，严禁使用“男角色”、“女角色”。
-
-	示例：
-	输入：
-	他摸了摸她的脸，“你不该挑起这副重担，但你弟弟太小。”
-
-	输出：
-	{
-	  "segments": [
-		{
-		  "text": "他摸了摸她的脸，",
-		  "typesetting": "他摸了摸她的脸，",
-		  "speaker": "Narrator",
-		  "emotion": "calm"
-		},
-		{
-		  "text": "“你不该挑起这副重担，但你弟弟太小。”",
-		  "typesetting": "“你不该挑起这副ZHONG4担，但你弟弟太小。”",
-		  "speaker": "加伯·蒙洛卡托",
-		  "emotion": "sad"
-		}
-	  ]
-	}
-
-	Emotion 必须是以下之一：[happy, angry, sad, afraid, disgusted, melancholic, surprised, calm]。
-	默认为 'calm'。
-	仅返回严格有效的 JSON。`
-
 	maxRetries := 3
 	var lastErr error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		log.Printf("[LLM] Sending Streaming request (Length: %d, Attempt: %d/%d)\n", len(text), attempt, maxRetries)
 
-		// Remove strict JSON enforcement to support "thinking" models that might not support it
-		// or that output text (thoughts) before the JSON.
+		var messages []openai.ChatCompletionMessage
+		messages = []openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleUser, Content: systemPrompt + "\n\n" + text},
+		}
+
 		req := openai.ChatCompletionRequest{
-			Model: c.model,
-			Messages: []openai.ChatCompletionMessage{
-				{Role: openai.ChatMessageRoleSystem, Content: prompt},
-				{Role: openai.ChatMessageRoleUser, Content: text},
-			},
-			Stream:      true,
-			Temperature: 0.3,
-			TopP:        0.95,
+			Model:    c.model,
+			Messages: messages,
+			Stream:   true,
 		}
 
 		stream, err := c.api.CreateChatCompletionStream(context.Background(), req)
@@ -389,93 +395,6 @@ func (c *Client) streamGemini(text string, onToken func(string)) ([]AnalysisResu
 		c.mu.Unlock()
 	}()
 
-	prompt := `分析提供的文本，并严格将其分割为 JSON 对象列表。
-	必须包含输入中的【所有文本】，并保持【原始顺序】。
-	返回必须是一个 JSON 对象，包含 "segments" 数组。
-
-	关键规则 1：【强制】分割对话与旁白 (MANDATORY Split)
-	核心原则：**严禁**在一个 JSON 对象中同时包含引号内的内容（对话）和引号外的内容（旁白）。
-	
-	执行步骤：
-	1. 扫描文本，找到所有的引号（“...” 或 "..."）。
-	2. 将引号内的部分提取为 { "speaker": "角色名", ... }。
-	3. 将引号外的部分（包括描述、动作、标点）提取为 { "speaker": "Narrator", ... }。
-	4. 保持原文的物理顺序。
-
-	常见结构处理：
-	1. [动作, 对话]：
-	   原文：他摸了摸她的脸，“你不该挑起这副重担，但你弟弟太小。”
-	   拆分：
-	   - {"text": "他摸了摸她的脸，", "speaker": "Narrator", ...}
-	   - {"text": "“你不该挑起这副重担，但你弟弟太小。”", "speaker": "加伯·蒙洛卡托", ...}
-	   注意：【，】归属旁白。
-
-	2. [对话, 动作]：
-	   原文：“快跑！”他大喊。
-	   拆分：
-	   - {"text": "“快跑！”", "speaker": "角色名", ...}
-	   - {"text": "他大喊。", "speaker": "Narrator", ...}
-
-	3. [对话, 动作, 对话] (三明治结构) - **极易出错，请注意**：
-	   原文：“蒙扎，”他会笑眯眯地俯视她，“没有你我该怎么办？”
-	   拆分：
-	   - {"text": "“蒙扎，”", "speaker": "加伯", ...}
-	   - {"text": "他会笑眯眯地俯视她，", "speaker": "Narrator", ...}
-	   - {"text": "“没有你我该怎么办？”", "speaker": "加伯", ...}
-
-	- 旁白 (Narrator)：描述动作、场景。Speaker: 'Narrator'。
-	- 对话 (Dialogue)：引号内的内容。Speaker: 角色名称。
-
-	关键规则 2：Typesetting 字段 (Pinyin Annotation)
-	"typesetting" 字段用于语音合成。
-	1. 【默认行为】：完全复制 "text" 字段的内容。
-	2. 【仅修改多音字】：只有在遇到以下列表中的多音字时，才将其替换为【对应的大写拼音+声调数字】。
-	   【重要】：仅替换多音字字符本身，**严禁**吞掉后面的词。
-	   正确示例： "难产" -> "NAN2产"
-	   错误示例： "难产" -> "NAN2"
-	3. 【严禁】：不要替换非多音字。不要留空。
-
-	多音字强制替换列表 (Mandatory Pinyin Replacement):
-	- 【行】：XH2 (银行) / XING2 (行为)
-	- 【得】：DEI3 (得去) / DE2 (跑得快) / DE5 (觉得)
-	- 【地】：DI4 (田地) / DE5 (慢慢地)
-	- 【重】：CHONG2 (重新) / ZHONG4 (重要, 重担)
-	- 【着】：ZHAO2 (着火) / ZHE5 (看着) / ZHUO2 (着装)
-	- 【长】：CHANG2 (长短) / ZHANG3 (长大)
-	- 【乐】：LE4 (快乐) / YUE4 (音乐)
-	- 【好】：HAO3 (好人) / HAO4 (爱好)
-	- 【干】：GAN1 (干净) / GAN4 (干活)
-	- 【难】：NAN2 (难产, 困难, 为难) / NAN4 (灾难, 难民)
-
-	关键规则 3：精准识别角色 (Contextual Speaker Inference)
-	根据上下文推理角色名称，严禁使用“男角色”、“女角色”。
-
-	示例：
-	输入：
-	他摸了摸她的脸，“你不该挑起这副重担，但你弟弟太小。”
-
-	输出：
-	{
-	  "segments": [
-		{
-		  "text": "他摸了摸她的脸，",
-		  "typesetting": "他摸了摸她的脸，",
-		  "speaker": "Narrator",
-		  "emotion": "calm"
-		},
-		{
-		  "text": "“你不该挑起这副重担，但你弟弟太小。”",
-		  "typesetting": "“你不该挑起这副ZHONG4担，但你弟弟太小。”",
-		  "speaker": "加伯·蒙洛卡托",
-		  "emotion": "sad"
-		}
-	  ]
-	}
-
-	Emotion 必须是以下之一：[happy, angry, sad, afraid, disgusted, melancholic, surprised, calm]。
-	默认为 'calm'。
-	仅返回严格有效的 JSON。`
-
 	maxRetries := 3
 	var lastErr error
 
@@ -485,25 +404,13 @@ func (c *Client) streamGemini(text string, onToken func(string)) ([]AnalysisResu
 		model = "gemini-3-flash-preview"
 	}
 
-	// Gemini SDK uses pointers for strings in some configs,
-	// but GenerateContentStream takes *genai.GenerateContentConfig.
-
-	// We construct a simple prompt with parts
-	// In genai package, contents are typically passed as []*Content
-	// But the simplified method often takes parts immediately.
-	// c.genaiClient.Models.GenerateContentStream(ctx, model, contents, config)
-
-	// The contents argument is []*genai.Content
-	// A Content has Parts []genai.Part
-	// A Part can be genai.Text
-
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		log.Printf("[LLM] Sending Gemini SDK Streaming request (Length: %d, Attempt: %d/%d)\n", len(text), attempt, maxRetries)
 
 		ctx := context.Background()
 
 		// Use genai.Text helper to create contents
-		contents := genai.Text(prompt + "\n\n" + text)
+		contents := genai.Text(systemPrompt + "\n\n" + text)
 
 		var fullContent strings.Builder
 		streamFailed := false

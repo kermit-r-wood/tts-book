@@ -30,10 +30,11 @@ type ProjectStore struct {
 }
 
 type VoiceConfig struct {
-	VoiceID  string  `json:"voiceId"`
-	Emotion  string  `json:"emotion"` // Default emotion
-	Speed    float64 `json:"speed"`
-	RefAudio string  `json:"refAudio"` // Path to reference audio for cloning
+	VoiceID       string  `json:"voiceId"`
+	Emotion       string  `json:"emotion"`       // Default emotion
+	UseLLMEmotion bool    `json:"useLLMEmotion"` // If true, use emotion from LLM analysis; if false, use default emotion
+	Speed         float64 `json:"speed"`
+	RefAudio      string  `json:"refAudio"` // Path to reference audio for cloning
 }
 
 var Store = &ProjectStore{

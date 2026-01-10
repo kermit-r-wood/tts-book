@@ -207,11 +207,12 @@ export default function CharacterManagement({ onBack }) {
                                 </th>
                                 <th className="p-4 w-1/4">Assigned Voice</th>
                                 <th className="p-4 w-32">Default Emotion</th>
+                                <th className="p-4 w-40">Emotion Mode</th>
                             </tr>
                         </thead>
                         <tbody>
                             {characters.length === 0 && (
-                                <tr><td colSpan="5" className="p-8 text-center text-gray-500">No characters found yet. Analyze some chapters!</td></tr>
+                                <tr><td colSpan="6" className="p-8 text-center text-gray-500">No characters found yet. Analyze some chapters!</td></tr>
                             )}
                             {sortedCharacters.map(char => (
                                 <tr key={char.name} className="border-b border-gray-700/50 hover:bg-white/5 transition-colors">
@@ -248,6 +249,17 @@ export default function CharacterManagement({ onBack }) {
                                                 <option key={em} value={em}>{emotionMap[em]}</option>
                                             ))}
                                         </select>
+                                    </td>
+                                    <td className="p-4">
+                                        <button
+                                            onClick={() => updateCharacterConfig(char.name, 'useLLMEmotion', !(voiceMapping[char.name]?.useLLMEmotion ?? true))}
+                                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${(voiceMapping[char.name]?.useLLMEmotion ?? true)
+                                                    ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30 hover:bg-violet-600/30'
+                                                    : 'bg-gray-700/50 text-gray-400 border border-gray-600/50 hover:bg-gray-700'
+                                                }`}
+                                        >
+                                            {(voiceMapping[char.name]?.useLLMEmotion ?? true) ? 'LLM分析' : '默认情感'}
+                                        </button>
                                     </td>
                                 </tr>
                             ))}

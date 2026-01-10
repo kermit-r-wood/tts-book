@@ -68,10 +68,42 @@ func GenerateAudio(c *gin.Context) {
 					voice = mapping.VoiceID // Fallback
 				}
 				speed = mapping.Speed
-				if mapping.Emotion != "" {
-					emotion = mapping.Emotion
+
+				// Determine emotion based on UseLLMEmotion setting
+
+				if mapping.UseLLMEmotion {
+
+					// Use emotion from LLM analysis (seg.Emotion)
+
+					if seg.Emotion != "" {
+
+						emotion = seg.Emotion
+
+					}
+
+				} else {
+
+					// Use default emotion from mapping
+
+					if mapping.Emotion != "" {
+
+						emotion = mapping.Emotion
+
+					}
+
 				}
+
 			}
+
+
+
+			if emotion == "" {
+
+				emotion = "calm"
+
+			}
+
+
 
 			if emotion == "" {
 				emotion = "calm"
@@ -113,6 +145,15 @@ func GenerateAudio(c *gin.Context) {
 		// Merge
 		BroadcastProgress(chapterID, 95, "Merging Audio Files...")
 		outPath := fmt.Sprintf("%s/%s.wav", outDir, chapterID)
+
+		// DEBUG: Save first segment for inspection
+		if len(filePaths) > 0 {
+			debugPath := fmt.Sprintf("%s/%s_segment0_debug.wav", outDir, chapterID)
+			if data, err := os.ReadFile(filePaths[0]); err == nil {
+				os.WriteFile(debugPath, data, 0644)
+				log.Printf("[TTS] DEBUG: Saved first segment to %s for inspection", debugPath)
+			}
+		}
 
 		if err := audio.MergeWavFiles(filePaths, outPath, cfg.MergeSilence); err != nil {
 			log.Printf("[TTS] Merge failed: %v", err)
@@ -253,10 +294,11 @@ func AnalyzeChapter(c *gin.Context) {
 				nextVoiceIdx++
 
 				Store.VoiceMapping[r.Speaker] = VoiceConfig{
-					VoiceID:  filepath.Base(voicePath),
-					RefAudio: voicePath,
-					Emotion:  "calm",
-					Speed:    1.0,
+					VoiceID:       filepath.Base(voicePath),
+					RefAudio:      voicePath,
+					Emotion:       "calm",
+					UseLLMEmotion: true, // Default to using LLM emotions
+					Speed:         1.0,
 				}
 				log.Printf("[Analyze] Auto-assigned voice %s to character %s", filepath.Base(voicePath), r.Speaker)
 			}
@@ -399,12 +441,18 @@ func AnalyzeAllChapters(c *gin.Context) {
 						nextVoiceIdx++
 
 						Store.VoiceMapping[r.Speaker] = VoiceConfig{
-							VoiceID:  filepath.Base(voicePath),
-							RefAudio: voicePath,
-							Emotion:  "calm",
-							Speed:    1.0,
-						}
-						log.Printf("[AnalyzeAll] Auto-assigned voice %s to character %s", filepath.Base(voicePath), r.Speaker)
+						VoiceID:       filepath.Base(voicePath),
+
+						RefAudio:      voicePath,
+
+						Emotion:       "calm",
+
+						UseLLMEmotion: true, // Default to using LLM emotions
+
+						Speed:         1.0,
+
+					}
+
 					}
 				}
 			}

@@ -216,14 +216,14 @@ func (c *Client) applySpeedAdjustment(audioData []byte, speed float64) ([]byte, 
 		return nil, fmt.Errorf("failed to create temp input file: %v", err)
 	}
 	defer os.Remove(tmpInput.Name())
-	defer tmpInput.Close()
 
 	tmpOutput, err := os.CreateTemp("", "tts-output-*.wav")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp output file: %v", err)
 	}
-	defer os.Remove(tmpOutput.Name())
-	defer tmpOutput.Close()
+	outputPath := tmpOutput.Name()
+	tmpOutput.Close() // Close immediately after getting the path
+	defer os.Remove(outputPath)
 
 	// Write audio data to temp input file
 	if _, err := tmpInput.Write(audioData); err != nil {
@@ -257,7 +257,7 @@ func (c *Client) applySpeedAdjustment(audioData []byte, speed float64) ([]byte, 
 		"-i", tmpInput.Name(),
 		"-af", filterChain,
 		"-y", // Overwrite output file
-		tmpOutput.Name(),
+		outputPath,
 	}
 
 	cmd := exec.Command("ffmpeg", cmdArgs...)
@@ -269,7 +269,7 @@ func (c *Client) applySpeedAdjustment(audioData []byte, speed float64) ([]byte, 
 	}
 
 	// Read the processed audio
-	processedData, err := os.ReadFile(tmpOutput.Name())
+	processedData, err := os.ReadFile(outputPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read processed audio: %v", err)
 	}
