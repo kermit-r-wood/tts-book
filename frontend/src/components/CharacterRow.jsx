@@ -13,7 +13,7 @@ const emotionMap = {
     'surprised': '惊讶'
 };
 
-export default function CharacterRow({ char, mappingData, updateMapping, voiceOptions, handleLocalFileSelect, selected, onSelect }) {
+export default function CharacterRow({ char, mappingData, updateMapping, voiceOptions, handleLocalFileSelect, selected, onSelect, occurrenceCount }) {
     const [isOpen, setIsOpen] = useState(false); // Controls dropdown open/close
     const [playingUrl, setPlayingUrl] = useState(null); // Track which URL is currently playing
     const audioRef = useRef(null); // Keep track of the Audio object
@@ -93,6 +93,11 @@ export default function CharacterRow({ char, mappingData, updateMapping, voiceOp
             </td>
             <td className="p-3 font-medium text-violet-300">
                 {char}
+                {occurrenceCount != null && (
+                    <span className="ml-2 text-xs text-gray-500 bg-gray-700/50 px-1.5 py-0.5 rounded-full" title="Appearances">
+                        {occurrenceCount}
+                    </span>
+                )}
             </td>
             <td className="p-3">
                 <div className="flex gap-2 items-center">

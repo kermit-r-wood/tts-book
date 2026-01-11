@@ -214,6 +214,7 @@ export default function ChapterDetail({ chapter, onBack, analysisData, setAnalys
                             setGenerationStarted(true);
                             setActiveTab('audio');
                         }}
+                        onRefresh={() => runAnalysis(false)}
                         embedded={true}
                     />
                 </div>

@@ -3,8 +3,9 @@ import { api } from '../services/api';
 import { User, CheckCircle, Merge, Check } from 'lucide-react';
 import CharacterRow from './CharacterRow';
 
-export default function CharacterStudio({ chapterId, onGenerate, embedded, analysisData }) {
+export default function CharacterStudio({ chapterId, onGenerate, embedded, analysisData, onRefresh }) {
     const [characters, setCharacters] = useState([]);
+    const [charCounts, setCharCounts] = useState({}); // Store occurrence counts
     const [mapping, setMapping] = useState({});
     const [loading, setLoading] = useState(true);
     const [confirming, setConfirming] = useState(false);
@@ -39,7 +40,18 @@ export default function CharacterStudio({ chapterId, onGenerate, embedded, analy
 
             // 1. Get characters from Local Analysis Data (Robust source)
             const analysis = analysisData[chapterId] || [];
-            const localChars = [...new Set(analysis.map(s => s.speaker).filter(Boolean))];
+
+            // Calculate occurrences
+            const counts = {};
+            analysis.forEach(s => {
+                if (s.speaker) {
+                    counts[s.speaker] = (counts[s.speaker] || 0) + 1;
+                }
+            });
+            setCharCounts(counts);
+
+            // Get unique characters and sort by count (descending)
+            const localChars = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
 
             // 2. Get existing mapping from Backend
             const res = await api.getCharacters();
@@ -167,10 +179,14 @@ export default function CharacterStudio({ chapterId, onGenerate, embedded, analy
             // We can just rely on `characters` state being updated? 
             // In `loadData`, we use `analysisData`. If `analysisData` is stale, `characters` will be stale.
 
-            // Workaround: We know what happened. We can manually update local state to reflect merge.
-            // Remove sources, keep target.
-            const sources = selectedChars.filter(c => c !== mergeTarget);
-            setCharacters(prev => prev.filter(c => !sources.includes(c)));
+            // Trigger parent refresh to get updated analysis data (merged names)
+            if (onRefresh) {
+                onRefresh();
+            } else {
+                // Fallback: Manually update local state if no refresh callback
+                const sources = selectedChars.filter(c => c !== mergeTarget);
+                setCharacters(prev => prev.filter(c => !sources.includes(c)));
+            }
 
             setTimeout(() => setMergeMessage(''), 3000);
 
@@ -237,6 +253,7 @@ export default function CharacterStudio({ chapterId, onGenerate, embedded, analy
                                 updateMapping={updateMapping}
                                 voiceOptions={voiceOptions}
                                 handleLocalFileSelect={handleLocalFileSelect}
+                                occurrenceCount={charCounts[char]}
                                 selected={selectedChars.includes(char)}
                                 onSelect={handleSelectChar}
                             />

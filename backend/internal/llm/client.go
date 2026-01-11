@@ -67,10 +67,11 @@ const systemPrompt = `
 	关键规则 2：Typesetting 字段 (Pinyin Annotation)
 	"typesetting" 字段用于语音合成。
 	1. 【默认行为】：完全复制 "text" 字段的内容。
-	2. 【仅修改多音字】：只有在遇到以下列表中的多音字时，才将其替换为【对应的大写拼音+声调数字】。
-	   【重要】：仅替换多音字字符本身，**严禁**吞掉后面的词。
+	2. 【仅修改多音字】：只有在遇到以下列表中的多音字时，将其【替换】为【对应的大写拼音+声调数字】。
+	   【重要】：替换的意思是**删掉原字**，填入拼音。严禁保留原字。
 	   正确示例： "难产" -> "NAN2产"
-	   错误示例： "难产" -> "NAN2"
+	   错误示例 1 (吞字)： "难产" -> "NAN2"
+	   错误示例 2 (保留原字)： "难产" -> "难NAN2产"
 	3. 【严禁】：不要替换非多音字。不要留空。
 
 	多音字强制替换列表 (Mandatory Pinyin Replacement):
@@ -143,6 +144,7 @@ func NewClient(cfg *config.Config) *Client {
 		isMock:      cfg.MockLLM,
 		provider:    cfg.LLMProvider,
 		apiKey:      cfg.LLMAPIKey,
+		model:       cfg.LLMModel,
 	}
 
 	if cfg.LLMProvider == "gemini" {
@@ -215,10 +217,11 @@ func (c *Client) AnalyzeTextStream(text string, onToken func(string)) ([]Analysi
 		}
 
 		req := openai.ChatCompletionRequest{
-			Model:    c.model,
-			Messages: messages,
-			Stream:   true,
+			Model:       c.model,
+			Messages:    messages,
+			Stream:      true,
 		}
+
 
 		stream, err := c.api.CreateChatCompletionStream(context.Background(), req)
 		if err != nil {

@@ -32,7 +32,7 @@ type ProjectStore struct {
 type VoiceConfig struct {
 	VoiceID       string  `json:"voiceId"`
 	Emotion       string  `json:"emotion"`       // Default emotion
-	UseLLMEmotion bool    `json:"useLLMEmotion"` // If true, use emotion from LLM analysis; if false, use default emotion
+	UseLLMEmotion *bool   `json:"useLLMEmotion"` // If true or nil, use emotion from LLM analysis; if false, use default emotion
 	Speed         float64 `json:"speed"`
 	RefAudio      string  `json:"refAudio"` // Path to reference audio for cloning
 }
@@ -93,5 +93,20 @@ func (s *ProjectStore) Load(bookID string) error {
 		return err
 	}
 
-	return json.Unmarshal(data, s)
+	if err := json.Unmarshal(data, s); err != nil {
+		return err
+	}
+
+	// Migration / Default Policy:
+	// Ensure all characters default to UseLLMEmotion = true
+	// This fixes legacy data where it might be false (default bool) or nil
+	for name, config := range s.VoiceMapping {
+		if config.UseLLMEmotion == nil || !*config.UseLLMEmotion {
+			t := true
+			config.UseLLMEmotion = &t
+			s.VoiceMapping[name] = config
+		}
+	}
+
+	return nil
 }

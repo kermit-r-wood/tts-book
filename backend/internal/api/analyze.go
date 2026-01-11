@@ -71,7 +71,14 @@ func GenerateAudio(c *gin.Context) {
 
 				// Determine emotion based on UseLLMEmotion setting
 
-				if mapping.UseLLMEmotion {
+				// Determine emotion based on UseLLMEmotion setting
+				// Default to true if nil
+				useLLM := true
+				if mapping.UseLLMEmotion != nil {
+					useLLM = *mapping.UseLLMEmotion
+				}
+
+				if useLLM {
 
 					// Use emotion from LLM analysis (seg.Emotion)
 
@@ -95,15 +102,11 @@ func GenerateAudio(c *gin.Context) {
 
 			}
 
-
-
 			if emotion == "" {
 
 				emotion = "calm"
 
 			}
-
-
 
 			if emotion == "" {
 				emotion = "calm"
@@ -123,19 +126,75 @@ func GenerateAudio(c *gin.Context) {
 				textToSpeak = seg.Text
 			}
 
-			log.Printf("[TTS] Generating segment %d with text: %s", i, textToSpeak) // Debug Log
-			audioData, err := ttsClient.Generate(textToSpeak, voice, emotion, speed)
-			if err != nil {
-				log.Printf("[TTS] Error generating segment %d: %v", i, err)
-				// Continue? Or Fail? Let's continue and skip for robustness, or fail.
-				// Fail is safer for now.
-				BroadcastProgress(chapterID, 0, fmt.Sprintf("Error: %v", err))
-				return
+			// Check for length and split if necessary
+			maxChars := 100 // Hardcoded limit for now
+			chunks := SplitTextForTTS(textToSpeak, maxChars)
+
+			var segmentAudioData []byte
+
+			if len(chunks) == 1 {
+				// Original logic for single chunk
+				log.Printf("[TTS] Generating segment %d with text: %s", i, textToSpeak)
+				audioData, err := ttsClient.Generate(textToSpeak, voice, emotion, speed)
+				if err != nil {
+					log.Printf("[TTS] Error generating segment %d: %v", i, err)
+					BroadcastProgress(chapterID, 0, fmt.Sprintf("Error: %v", err))
+					return
+				}
+				segmentAudioData = audioData
+			} else {
+				// Split logic
+				log.Printf("[TTS] Segment %d is long (%d chars), split into %d chunks", i, len([]rune(textToSpeak)), len(chunks))
+				var chunkFiles []string
+
+				for j, chunk := range chunks {
+					BroadcastProgress(chapterID, int((float64(i)/float64(total))*100), fmt.Sprintf("Generating (%d/%d): Part %d/%d...", i+1, total, j+1, len(chunks)))
+					log.Printf("[TTS] Generating segment %d chunk %d: %s", i, j, chunk)
+
+					chunkAudio, err := ttsClient.Generate(chunk, voice, emotion, speed)
+					if err != nil {
+						log.Printf("[TTS] Error generating segment %d chunk %d: %v", i, j, err)
+						BroadcastProgress(chapterID, 0, fmt.Sprintf("Error in chunk: %v", err))
+						return
+					}
+
+					// Save chunk to temp
+					chunkPath := fmt.Sprintf("%s/%d_part_%d.wav", tempDir, i, j)
+					if err := os.WriteFile(chunkPath, chunkAudio, 0644); err != nil {
+						log.Printf("[TTS] Failed to write chunk file: %v", err)
+						return
+					}
+					chunkFiles = append(chunkFiles, chunkPath)
+				}
+
+				// Merge chunks into one segment
+				// Using 0ms silence for intra-segment merge, as splits might be comma-based.
+				// If we want sentence pauses, we'd need smarter splitting or rely on TTS natural pause.
+				mergedPath := fmt.Sprintf("%s/%d_merged.wav", tempDir, i)
+				if err := audio.MergeWavFiles(chunkFiles, mergedPath, 0); err != nil {
+					log.Printf("[TTS] Failed to merge chunks for segment %d: %v", i, err)
+					return
+				}
+
+				// Read back the merged data to be consistent with main flow
+				// (Though efficiently we could just rename it to the final destination, but existing logic appends to filePaths)
+				data, err := os.ReadFile(mergedPath)
+				if err != nil {
+					log.Printf("[TTS] Failed to read merged segment %d: %v", i, err)
+					return
+				}
+				segmentAudioData = data
+
+				// Cleanup chunk files
+				for _, f := range chunkFiles {
+					os.Remove(f)
+				}
+				os.Remove(mergedPath) // Will be rewritten below as final segment file
 			}
 
-			// Save temp file
+			// Save temp file (final segment)
 			filePath := fmt.Sprintf("%s/%d.wav", tempDir, i)
-			if err := os.WriteFile(filePath, audioData, 0644); err != nil {
+			if err := os.WriteFile(filePath, segmentAudioData, 0644); err != nil {
 				log.Printf("[TTS] Failed to write temp file: %v", err)
 				return
 			}
@@ -145,15 +204,6 @@ func GenerateAudio(c *gin.Context) {
 		// Merge
 		BroadcastProgress(chapterID, 95, "Merging Audio Files...")
 		outPath := fmt.Sprintf("%s/%s.wav", outDir, chapterID)
-
-		// DEBUG: Save first segment for inspection
-		if len(filePaths) > 0 {
-			debugPath := fmt.Sprintf("%s/%s_segment0_debug.wav", outDir, chapterID)
-			if data, err := os.ReadFile(filePaths[0]); err == nil {
-				os.WriteFile(debugPath, data, 0644)
-				log.Printf("[TTS] DEBUG: Saved first segment to %s for inspection", debugPath)
-			}
-		}
 
 		if err := audio.MergeWavFiles(filePaths, outPath, cfg.MergeSilence); err != nil {
 			log.Printf("[TTS] Merge failed: %v", err)
@@ -297,7 +347,7 @@ func AnalyzeChapter(c *gin.Context) {
 					VoiceID:       filepath.Base(voicePath),
 					RefAudio:      voicePath,
 					Emotion:       "calm",
-					UseLLMEmotion: true, // Default to using LLM emotions
+					UseLLMEmotion: boolPtr(true), // Default to using LLM emotions
 					Speed:         1.0,
 				}
 				log.Printf("[Analyze] Auto-assigned voice %s to character %s", filepath.Base(voicePath), r.Speaker)
@@ -441,17 +491,16 @@ func AnalyzeAllChapters(c *gin.Context) {
 						nextVoiceIdx++
 
 						Store.VoiceMapping[r.Speaker] = VoiceConfig{
-						VoiceID:       filepath.Base(voicePath),
+							VoiceID: filepath.Base(voicePath),
 
-						RefAudio:      voicePath,
+							RefAudio: voicePath,
 
-						Emotion:       "calm",
+							Emotion: "calm",
 
-						UseLLMEmotion: true, // Default to using LLM emotions
+							UseLLMEmotion: boolPtr(true), // Default to using LLM emotions
 
-						Speed:         1.0,
-
-					}
+							Speed: 1.0,
+						}
 
 					}
 				}
@@ -549,6 +598,77 @@ func SplitText(text string, limit int) []string {
 		}
 
 		chunks = append(chunks, string(runes[start:splitIdx]))
+		start = splitIdx
+	}
+
+	return chunks
+}
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+// SplitTextForTTS splits a string into chunks small enough for TTS.
+// It prioritizes splitting by sentence endings (。！？) and tries to keep chunks under maxChars.
+func SplitTextForTTS(text string, maxChars int) []string {
+	runes := []rune(text)
+	if len(runes) <= maxChars {
+		return []string{text}
+	}
+
+	var chunks []string
+	start := 0
+	length := len(runes)
+
+	for start < length {
+		// If remaining is small enough, just add it
+		if length-start <= maxChars {
+			chunks = append(chunks, string(runes[start:]))
+			break
+		}
+
+		// Find best split point
+		// We want to split at maxChars, but we look back to find a valid punctuation
+		targetEnd := start + maxChars
+		if targetEnd > length {
+			targetEnd = length
+		}
+
+		splitIdx := -1
+
+		// Priority 1: Chinese Sentence Endings (。！？)
+		// Scan backwards from targetEnd to start
+		for i := targetEnd - 1; i > start; i-- {
+			c := runes[i]
+			// Check for sentence delimiters.
+			// We split AFTER the delimiter so it stays with the previous sentence.
+			if c == '。' || c == '！' || c == '？' || c == '；' {
+				splitIdx = i + 1
+				break
+			}
+		}
+
+		// Priority 2: Comma (，) if no sentence ending found
+		if splitIdx == -1 {
+			for i := targetEnd - 1; i > start; i-- {
+				if runes[i] == '，' {
+					splitIdx = i + 1
+					break
+				}
+			}
+		}
+
+		// Priority 3: Hard split if no punctuation found (rare but possible)
+		if splitIdx == -1 {
+			splitIdx = targetEnd
+		}
+
+		// Ensure we make progress
+		if splitIdx <= start {
+			splitIdx = start + 1
+		}
+
+		chunk := string(runes[start:splitIdx])
+		chunks = append(chunks, chunk)
 		start = splitIdx
 	}
 
