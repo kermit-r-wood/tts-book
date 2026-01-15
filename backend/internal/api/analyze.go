@@ -171,7 +171,7 @@ func GenerateAudio(c *gin.Context) {
 				// Using 0ms silence for intra-segment merge, as splits might be comma-based.
 				// If we want sentence pauses, we'd need smarter splitting or rely on TTS natural pause.
 				mergedPath := fmt.Sprintf("%s/%d_merged.wav", tempDir, i)
-				if err := audio.MergeWavFiles(chunkFiles, mergedPath, 0); err != nil {
+				if err := audio.MergeAndNormalize(chunkFiles, mergedPath, 0, false); err != nil {
 					log.Printf("[TTS] Failed to merge chunks for segment %d: %v", i, err)
 					return
 				}
@@ -205,7 +205,7 @@ func GenerateAudio(c *gin.Context) {
 		BroadcastProgress(chapterID, 95, "Merging Audio Files...")
 		outPath := fmt.Sprintf("%s/%s.wav", outDir, chapterID)
 
-		if err := audio.MergeWavFiles(filePaths, outPath, cfg.MergeSilence); err != nil {
+		if err := audio.MergeAndNormalize(filePaths, outPath, cfg.MergeSilence, cfg.NormalizeAudio); err != nil {
 			log.Printf("[TTS] Merge failed: %v", err)
 			BroadcastProgress(chapterID, 0, fmt.Sprintf("Merge Error: %v", err))
 			return

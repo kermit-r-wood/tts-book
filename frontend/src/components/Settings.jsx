@@ -12,6 +12,7 @@ export default function Settings() {
         llm_chunk_size: 1000,
         llm_min_interval: 3000,
         merge_silence: 400,
+        normalize_audio: true,
         mock_llm: false,
         voice_dir: ''
     });
@@ -180,6 +181,19 @@ export default function Settings() {
                             placeholder="400"
                         />
                     </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                    <input
+                        type="checkbox"
+                        id="normalize_audio"
+                        checked={config.normalize_audio !== false}
+                        onChange={e => setConfig({ ...config, normalize_audio: e.target.checked })}
+                        className="w-4 h-4 rounded border-gray-600 bg-slate-700 text-violet-500 focus:ring-violet-500"
+                    />
+                    <label htmlFor="normalize_audio" className="text-sm text-gray-300 cursor-pointer select-none">
+                        启用音量标准化 (Normalization)
+                    </label>
                 </div>
 
                 <div className="flex items-center gap-2">

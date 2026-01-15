@@ -200,3 +200,223 @@ func findDataChunk(f *os.File) (int64, uint32, error) {
 		}
 	}
 }
+
+// NormalizeAudio performs peak normalization on a WAV file using pure Go.
+// It currently only supports 16-bit PCM (linear) WAV files.
+// It will normalize the audio to -1.0 dB (approx 90% peak).
+func NormalizeAudio(inputPath, outputPath string) error {
+	f, err := os.Open(inputPath)
+	if err != nil {
+		return fmt.Errorf("failed to open input file: %w", err)
+	}
+	defer f.Close()
+
+	// Parse Header
+	riffHeader := make([]byte, 12)
+	if _, err := io.ReadFull(f, riffHeader); err != nil {
+		return fmt.Errorf("failed to read RIFF: %w", err)
+	}
+
+	// Read chunks to find fmt and data
+	var audioFormat uint16
+	var numChannels uint16
+	var sampleRate uint32
+	var bitsPerSample uint16
+	var dataOffset int64
+	var dataSize uint32
+
+	// We need to rewind to parse correctly if we re-use logic, but let's just scan manually
+	// to ensure we capture AudioFormat
+	chunkHeader := make([]byte, 8)
+	for {
+		if _, err := io.ReadFull(f, chunkHeader); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("read chunk header failed: %w", err)
+		}
+		chunkID := string(chunkHeader[0:4])
+		chunkSize := binary.LittleEndian.Uint32(chunkHeader[4:8])
+
+		if chunkID == "fmt " {
+			fmtData := make([]byte, chunkSize)
+			if _, err := io.ReadFull(f, fmtData); err != nil {
+				return fmt.Errorf("read fmt data failed: %w", err)
+			}
+			audioFormat = binary.LittleEndian.Uint16(fmtData[0:2])
+			numChannels = binary.LittleEndian.Uint16(fmtData[2:4])
+			sampleRate = binary.LittleEndian.Uint32(fmtData[4:8])
+			bitsPerSample = binary.LittleEndian.Uint16(fmtData[14:16])
+		} else if chunkID == "data" {
+			dataOffset, _ = f.Seek(0, io.SeekCurrent)
+			dataSize = chunkSize
+			break // Data found, stop scanning (assuming data is last or we just need it)
+		} else {
+			f.Seek(int64(chunkSize), io.SeekCurrent)
+		}
+	}
+
+	// Validation
+	if audioFormat != 1 {
+		return fmt.Errorf("unsupported audio format %d (only PCM=1 is supported)", audioFormat)
+	}
+	if bitsPerSample != 16 {
+		return fmt.Errorf("unsupported bit depth %d (only 16-bit is supported)", bitsPerSample)
+	}
+
+	// Pass 1: Find Peak
+	if _, err := f.Seek(dataOffset, 0); err != nil {
+		return err
+	}
+
+	maxPeak := int16(0)
+	buf := make([]byte, 4096) // Read in chunks
+
+	bytesRead := uint32(0)
+	for bytesRead < dataSize {
+		n, err := f.Read(buf)
+		if err != nil && err != io.EOF {
+			return err
+		}
+		if n == 0 {
+			break
+		}
+
+		// Process buffer
+		limit := n
+		if uint32(limit) > dataSize-bytesRead {
+			limit = int(dataSize - bytesRead)
+		}
+
+		for i := 0; i < limit; i += 2 {
+			val := int16(binary.LittleEndian.Uint16(buf[i : i+2]))
+			if val < 0 {
+				val = -val
+			}
+			if val > maxPeak {
+				maxPeak = val
+			}
+		}
+		bytesRead += uint32(n)
+	}
+
+	if maxPeak == 0 {
+		// Silent file, just copy
+		f.Seek(0, 0)
+		out, _ := os.Create(outputPath)
+		io.Copy(out, f)
+		out.Close()
+		return nil
+	}
+
+	// Calculate Gain
+	// Target: -1.0 dB ~ 0.891 * 32767 = 29195
+	targetPeak := 29195.0
+	gain := targetPeak / float64(maxPeak)
+
+	if gain < 1.0 {
+		// Don't reduce volume, only boost. Or should we?
+		// Normalization usually implies matching target.
+		// If it's already louder than -1dB, we should reduce it to avoid clipping/consistency.
+	}
+
+	fmt.Printf("[Normalizer] MaxPeak: %d, Gain: %.4f\n", maxPeak, gain)
+
+	// Pass 2: Apply Gain and Write
+	out, err := os.Create(outputPath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	// Parse original file headers again to copy them exactly?
+	// Simpler: Just reconstruct the header.
+	// RIFF Header
+	out.Write([]byte("RIFF"))
+	binary.Write(out, binary.LittleEndian, uint32(36+dataSize))
+	out.Write([]byte("WAVE"))
+
+	// fmt chunk
+	out.Write([]byte("fmt "))
+	binary.Write(out, binary.LittleEndian, uint32(16)) // Subchunk1Size for PCM
+	binary.Write(out, binary.LittleEndian, uint16(1))  // AudioFormat 1
+	binary.Write(out, binary.LittleEndian, numChannels)
+	binary.Write(out, binary.LittleEndian, sampleRate)
+	byteRate := sampleRate * uint32(numChannels) * uint32(bitsPerSample/8)
+	binary.Write(out, binary.LittleEndian, byteRate)
+	blockAlign := uint16(numChannels * (bitsPerSample / 8))
+	binary.Write(out, binary.LittleEndian, blockAlign)
+	binary.Write(out, binary.LittleEndian, bitsPerSample)
+
+	// data chunk header
+	out.Write([]byte("data"))
+	binary.Write(out, binary.LittleEndian, dataSize)
+
+	// Write data
+	f.Seek(dataOffset, 0)
+	bytesRead = 0
+
+	writeBuf := make([]byte, 4096)
+
+	for bytesRead < dataSize {
+		n, err := f.Read(buf) // reuse reading buf
+		if err != nil && err != io.EOF {
+			return err
+		}
+		if n == 0 {
+			break
+		}
+
+		limit := n
+		if uint32(limit) > dataSize-bytesRead {
+			limit = int(dataSize - bytesRead)
+		}
+
+		for i := 0; i < limit; i += 2 {
+			val := int16(binary.LittleEndian.Uint16(buf[i : i+2]))
+
+			newVal := int32(float64(val) * gain)
+			// Clamp
+			if newVal > 32767 {
+				newVal = 32767
+			} else if newVal < -32768 {
+				newVal = -32768
+			}
+
+			binary.LittleEndian.PutUint16(writeBuf[i:i+2], uint16(int16(newVal)))
+		}
+
+		out.Write(writeBuf[:limit])
+		bytesRead += uint32(n)
+	}
+
+	return nil
+}
+
+// MergeAndNormalize works like MergeWavFiles but optionally applies normalization
+func MergeAndNormalize(inputs []string, outputPath string, silenceMs int, normalize bool) error {
+	if !normalize {
+		return MergeWavFiles(inputs, outputPath, silenceMs)
+	}
+
+	// Merge to a temporary file first
+	tempMerged := outputPath + ".tmp.wav"
+	// Ensure temp file is cleaned up
+	defer os.Remove(tempMerged)
+
+	if err := MergeWavFiles(inputs, tempMerged, silenceMs); err != nil {
+		return err
+	}
+
+	// Normalize
+	if err := NormalizeAudio(tempMerged, outputPath); err != nil {
+		fmt.Printf("Normalization failed: %v. Using un-normalized audio.\n", err)
+		// If normalization fails (e.g. wrong format), just move the temp file
+		os.Rename(tempMerged, outputPath)
+		// Consider returning nil error so process doesn't stop?
+		// But let's log it.
+		return nil
+	}
+
+	return nil
+}

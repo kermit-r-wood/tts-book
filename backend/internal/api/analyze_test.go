@@ -27,7 +27,7 @@ func TestAnalyzeChapter_MockMode(t *testing.T) {
 	// 2. Setup Gin
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	api.SetupRoutes(r, cfg)
+	api.SetupRoutes(r, cfg, nil)
 
 	// 3. Preload a dummy chapter into memory store
 	chapterID := "ch_test"

@@ -12,7 +12,16 @@ import (
 	"tts-book/backend/internal/config"
 
 	"github.com/go-resty/resty/v2"
+
+	"golang.org/x/text/unicode/norm"
 )
+
+// variantMap contains specific character mappings for CJK unified ideographs
+// or other characters that are not handled by NFKC normalization but cause
+// "unknown token" errors in the TTS model.
+var variantMap = map[rune]rune{
+	'晩': '晚', // U+6669 -> U+665A
+}
 
 type Client struct {
 	client *resty.Client
@@ -28,8 +37,35 @@ func NewClient(cfg *config.Config) *Client {
 	}
 }
 
+// sanitizeText applies NFKC normalization and custom variant replacements
+// to ensure the text contains characters compatible with the TTS model.
+func (c *Client) sanitizeText(text string) string {
+	// 1. Apply NFKC normalization
+	// This handles compatibility characters like full-width numbers, circled digits, etc.
+	normalized := norm.NFKC.String(text)
+
+	// 2. Apply specific variant replacements
+	// Since strings are immutable, we build a new string if replacements are needed.
+	// A simple approach is to iterate over runes.
+	var b strings.Builder
+	b.Grow(len(normalized))
+
+	for _, r := range normalized {
+		if replacement, ok := variantMap[r]; ok {
+			b.WriteRune(replacement)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+
+	return b.String()
+}
+
 // Generate calls the Index-TTS API using the Gradio Event Protocol.
 func (c *Client) Generate(text, voice, emotion string, speed float64) ([]byte, error) {
+	// 0. Sanitize Text
+	text = c.sanitizeText(text)
+
 	// 1. Prepare Arguments
 	if voice == "" {
 		// Try to find a default voice in the configured voice directory
@@ -68,6 +104,14 @@ func (c *Client) Generate(text, voice, emotion string, speed float64) ([]byte, e
 		vecs[7] = 1.0 // Default Calm
 	}
 
+	// Determine control method
+	controlMethod := "Same as the voice reference"
+	if emotion != "" {
+		controlMethod = "Use emotion vectors"
+	}
+
+	fmt.Printf("Emo control mode:%s,vec:%v\n", controlMethod, vecs)
+
 	// Create FileData object for voice and emo_ref
 	fileObj := map[string]interface{}{
 		"path": voice,
@@ -76,11 +120,11 @@ func (c *Client) Generate(text, voice, emotion string, speed float64) ([]byte, e
 
 	// Construct data array (24 arguments)
 	data := []interface{}{
-		"Same as the voice reference",      // [0]
+		controlMethod,                      // [0]
 		fileObj,                            // [1] prompt (FileData object)
 		text,                               // [2] text
 		fileObj,                            // [3] emo_ref_path (Using same as voice)
-		0.7,                                // [4] emo_weight
+		0.3,                                // [4] emo_weight
 		vecs[0], vecs[1], vecs[2], vecs[3], // [5-8]
 		vecs[4], vecs[5], vecs[6], vecs[7], // [9-12]
 		"",    // [13] emo_text

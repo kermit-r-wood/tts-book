@@ -15,6 +15,7 @@ type Config struct {
 	LLMMinInterval int    `json:"llm_min_interval"` // Default 3000 ms
 	MockLLM        bool   `json:"mock_llm"`         // Mock LLM responses
 	MergeSilence   int    `json:"merge_silence"`    // Silence between audio segments in ms
+	NormalizeAudio bool   `json:"normalize_audio"`  // Whether to normalize audio volume
 	IndexTTSUrl    string `json:"index_tts_url"`
 	VoiceDir       string `json:"voice_dir"`
 	Port           string `json:"port"`
@@ -37,6 +38,7 @@ func Load() *Config {
 			LLMChunkSize:   800,
 			LLMMinInterval: 3000,
 			MergeSilence:   400,                     // Default 400ms silence between segments
+			NormalizeAudio: true,                    // Default true
 			IndexTTSUrl:    "http://127.0.0.1:7860", // Default
 			VoiceDir:       "voices",                // Default local voice directory
 			Port:           "8080",
