@@ -185,36 +185,7 @@ export default function CharacterRow({ char, mappingData, updateMapping, voiceOp
                     ))}
                 </select>
             </td>
-            <td className="p-3">
-                <input
-                    type="number" step="0.1"
-                    className="input-field text-sm py-1 w-20"
-                    placeholder="1.0"
-                    value={mappingData?.speed ?? 1.0}
-                    onChange={e => {
-                        const val = e.target.value;
-                        // Allow empty or partial input during typing
-                        if (val === '' || val === '-' || val === '.' || val.endsWith('.')) {
-                            updateMapping(char, 'speed', val);
-                        } else {
-                            const num = parseFloat(val);
-                            if (!isNaN(num)) {
-                                updateMapping(char, 'speed', num);
-                            }
-                        }
-                    }}
-                    onBlur={e => {
-                        // On blur, ensure we have a valid number
-                        const val = e.target.value;
-                        const num = parseFloat(val);
-                        if (isNaN(num) || val === '') {
-                            updateMapping(char, 'speed', 1.0);
-                        } else {
-                            updateMapping(char, 'speed', num);
-                        }
-                    }}
-                />
-            </td>
+
             <td className="p-3">
                 <button
                     onClick={() => updateMapping(char, 'useLLMEmotion', !(mappingData?.useLLMEmotion ?? true))}

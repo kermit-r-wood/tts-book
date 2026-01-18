@@ -59,7 +59,6 @@ func GenerateAudio(c *gin.Context) {
 			Store.Mu.RUnlock()
 
 			voice := ""
-			speed := 1.0
 			emotion := seg.Emotion
 
 			if hasMapping {
@@ -67,7 +66,6 @@ func GenerateAudio(c *gin.Context) {
 				if voice == "" {
 					voice = mapping.VoiceID // Fallback
 				}
-				speed = mapping.Speed
 
 				// Determine emotion based on UseLLMEmotion setting
 
@@ -135,7 +133,7 @@ func GenerateAudio(c *gin.Context) {
 			if len(chunks) == 1 {
 				// Original logic for single chunk
 				log.Printf("[TTS] Generating segment %d with text: %s", i, textToSpeak)
-				audioData, err := ttsClient.Generate(textToSpeak, voice, emotion, speed)
+				audioData, err := ttsClient.Generate(textToSpeak, voice, emotion)
 				if err != nil {
 					log.Printf("[TTS] Error generating segment %d: %v", i, err)
 					BroadcastProgress(chapterID, 0, fmt.Sprintf("Error: %v", err))
@@ -151,7 +149,7 @@ func GenerateAudio(c *gin.Context) {
 					BroadcastProgress(chapterID, int((float64(i)/float64(total))*100), fmt.Sprintf("Generating (%d/%d): Part %d/%d...", i+1, total, j+1, len(chunks)))
 					log.Printf("[TTS] Generating segment %d chunk %d: %s", i, j, chunk)
 
-					chunkAudio, err := ttsClient.Generate(chunk, voice, emotion, speed)
+					chunkAudio, err := ttsClient.Generate(chunk, voice, emotion)
 					if err != nil {
 						log.Printf("[TTS] Error generating segment %d chunk %d: %v", i, j, err)
 						BroadcastProgress(chapterID, 0, fmt.Sprintf("Error in chunk: %v", err))
@@ -348,7 +346,6 @@ func AnalyzeChapter(c *gin.Context) {
 					RefAudio:      voicePath,
 					Emotion:       "calm",
 					UseLLMEmotion: boolPtr(true), // Default to using LLM emotions
-					Speed:         1.0,
 				}
 				log.Printf("[Analyze] Auto-assigned voice %s to character %s", filepath.Base(voicePath), r.Speaker)
 			}
@@ -498,8 +495,6 @@ func AnalyzeAllChapters(c *gin.Context) {
 							Emotion: "calm",
 
 							UseLLMEmotion: boolPtr(true), // Default to using LLM emotions
-
-							Speed: 1.0,
 						}
 
 					}

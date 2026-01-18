@@ -1,12 +1,10 @@
 package tts
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 
 	"tts-book/backend/internal/config"
@@ -62,7 +60,7 @@ func (c *Client) sanitizeText(text string) string {
 }
 
 // Generate calls the Index-TTS API using the Gradio Event Protocol.
-func (c *Client) Generate(text, voice, emotion string, speed float64) ([]byte, error) {
+func (c *Client) Generate(text, voice, emotion string) ([]byte, error) {
 	// 0. Sanitize Text
 	text = c.sanitizeText(text)
 
@@ -237,89 +235,7 @@ func (c *Client) Generate(text, voice, emotion string, speed float64) ([]byte, e
 
 	audioData := audioResp.Body()
 
-	// Apply speed adjustment if needed
-	if speed != 1.0 {
-		processedAudio, err := c.applySpeedAdjustment(audioData, speed)
-		if err != nil {
-			// Log the error but return original audio instead of failing completely
-			fmt.Printf("[TTS] Warning: Failed to apply speed adjustment (%.2fx): %v\n", speed, err)
-			fmt.Printf("[TTS] Returning original audio without speed adjustment\n")
-			return audioData, nil
-		}
-		return processedAudio, nil
-	}
-
 	return audioData, nil
-}
-
-// applySpeedAdjustment uses FFmpeg to adjust audio playback speed without changing pitch
-func (c *Client) applySpeedAdjustment(audioData []byte, speed float64) ([]byte, error) {
-	// Create temporary files for input and output
-	tmpInput, err := os.CreateTemp("", "tts-input-*.wav")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp input file: %v", err)
-	}
-	defer os.Remove(tmpInput.Name())
-
-	tmpOutput, err := os.CreateTemp("", "tts-output-*.wav")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp output file: %v", err)
-	}
-	outputPath := tmpOutput.Name()
-	tmpOutput.Close() // Close immediately after getting the path
-	defer os.Remove(outputPath)
-
-	// Write audio data to temp input file
-	if _, err := tmpInput.Write(audioData); err != nil {
-		return nil, fmt.Errorf("failed to write audio data: %v", err)
-	}
-	tmpInput.Close()
-
-	// Build FFmpeg atempo filter chain
-	// atempo filter range is 0.5 to 2.0, so we may need to chain multiple filters
-	var atempoFilters []string
-	remainingSpeed := speed
-
-	for remainingSpeed > 0 {
-		if remainingSpeed >= 2.0 {
-			atempoFilters = append(atempoFilters, "atempo=2.0")
-			remainingSpeed /= 2.0
-		} else if remainingSpeed <= 0.5 {
-			atempoFilters = append(atempoFilters, "atempo=0.5")
-			remainingSpeed /= 0.5
-		} else {
-			atempoFilters = append(atempoFilters, fmt.Sprintf("atempo=%.4f", remainingSpeed))
-			break
-		}
-	}
-
-	filterChain := strings.Join(atempoFilters, ",")
-
-	// Build FFmpeg command
-	// ffmpeg -i input.wav -af "atempo=X.X" output.wav
-	cmdArgs := []string{
-		"-i", tmpInput.Name(),
-		"-af", filterChain,
-		"-y", // Overwrite output file
-		outputPath,
-	}
-
-	cmd := exec.Command("ffmpeg", cmdArgs...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("ffmpeg failed: %v, stderr: %s", err, stderr.String())
-	}
-
-	// Read the processed audio
-	processedData, err := os.ReadFile(outputPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read processed audio: %v", err)
-	}
-
-	fmt.Printf("[TTS] Successfully applied speed adjustment: %.2fx (filters: %s)\n", speed, filterChain)
-	return processedData, nil
 }
 
 func (c *Client) uploadVoice(filePath string) (string, error) {

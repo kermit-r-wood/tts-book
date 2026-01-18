@@ -240,7 +240,7 @@ export default function CharacterStudio({ chapterId, onGenerate, embedded, analy
                             <th className="p-3">角色</th>
                             <th className="p-3 w-1/3">语音路径 / 链接</th>
                             <th className="p-3 w-32">默认情感</th>
-                            <th className="p-3 w-24">语速</th>
+
                             <th className="p-3 w-32">情感模式</th>
                         </tr>
                     </thead>
