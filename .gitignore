@@ -39,3 +39,8 @@ backend/data/*
 !backend/data/.gitkeep
 backend/uploads/*
 !backend/uploads/.gitkeep
+
+#index-tts-packager
+tools/packager/*
+
+.agent

@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-and-release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Build Frontend
+        working-directory: ./frontend
+        run: |
+          npm install
+          npm run build
+
+      - name: Prepare Embed Assets
+        run: |
+          # Clean and copy frontend dist to backend embed location
+          rm -rf backend/cmd/server/dist
+          mkdir -p backend/cmd/server/dist
+          cp -r frontend/dist/* backend/cmd/server/dist/
+          # Listing for verification in logs
+          ls -R backend/cmd/server/dist
+
+      - name: Build and Package Binaries
+        env:
+          CGO_ENABLED: 0
+        run: |
+          mkdir build_artifacts
+
+          # Function to build and compress
+          build_target() {
+            OS=$1
+            ARCH=$2
+            EXT=$3
+            
+            # The name of the binary inside the archive
+            FINAL_NAME="tts-book${EXT}"
+            # The name of the archive file
+            ARCHIVE_NAME="tts-book-${OS}-${ARCH}"
+            
+            echo "Building for $OS/$ARCH..."
+            
+            # Build
+            GOOS=$OS GOARCH=$ARCH go build -ldflags="-s -w" -o "${FINAL_NAME}" ./backend/cmd/server
+            
+            # Compress
+            if [ "$OS" == "windows" ]; then
+              zip "build_artifacts/${ARCHIVE_NAME}.zip" "${FINAL_NAME}"
+            else
+              tar -czvf "build_artifacts/${ARCHIVE_NAME}.tar.gz" "${FINAL_NAME}"
+            fi
+            
+            # Cleanup binary to prepare for next build
+            rm "${FINAL_NAME}"
+          }
+
+          # Windows amd64
+          build_target windows amd64 .exe
+
+          # Linux amd64
+          build_target linux amd64 ""
+
+          # macOS amd64 (Intel)
+          build_target darwin amd64 ""
+
+          # macOS arm64 (Apple Silicon)
+          build_target darwin arm64 ""
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: build_artifacts/*
