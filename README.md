@@ -14,7 +14,8 @@
 
 ### 生成效果
 
-<audio controls src="doc/q.mp3" title="阿Q正传 - 第三章"></audio>
+
+[试听音频](https://github.com/kermit-r-wood/tts-book/raw/master/doc/q.mp3)
 
 > 第三章 续优胜记
 >
