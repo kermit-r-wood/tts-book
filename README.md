@@ -15,8 +15,7 @@
 ### 生成效果
 
 
-
-<video controls src="doc/q.mp4" title="阿Q正传生成效果"></video>
+https://github.com/user-attachments/assets/90fd86b5-5754-45f6-88bf-9db6c3ce0e8a
 
 > 第三章 续优胜记
 >
