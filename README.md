@@ -15,7 +15,8 @@
 ### 生成效果
 
 
-https://github.com/kermit-r-wood/tts-book/raw/master/doc/q.mp4
+
+<video controls src="doc/q.mp4" title="阿Q正传生成效果"></video>
 
 > 第三章 续优胜记
 >
