@@ -15,7 +15,7 @@
 ### 生成效果
 
 
-[试听音频](https://github.com/kermit-r-wood/tts-book/raw/master/doc/q.mp3)
+https://github.com/kermit-r-wood/tts-book/raw/master/doc/q.mp4
 
 > 第三章 续优胜记
 >
