@@ -79,7 +79,15 @@ export default function CharacterRow({ char, mappingData, updateMapping, voiceOp
 
     const selectedOption = voiceOptions.find(v => v.path === mappingData?.voiceId);
     const getCleanName = (name) => name.replace(/\s*\(\)\s*$/, '');
-    const displayValue = selectedOption ? getCleanName(selectedOption.name) : (mappingData?.voiceId || '');
+
+    // Extract filename if it looks like a path and isn't a known option
+    let fallbackName = mappingData?.voiceId || '';
+    if (!selectedOption && fallbackName) {
+        // Handle both Windows and Unix paths
+        fallbackName = fallbackName.split(/[\\/]/).pop();
+    }
+
+    const displayValue = selectedOption ? getCleanName(selectedOption.name) : fallbackName;
 
     return (
         <tr className={`border-b border-gray-700/50 transition-colors ${selected ? 'bg-violet-900/10' : 'hover:bg-white/5'}`}>

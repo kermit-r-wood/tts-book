@@ -95,6 +95,11 @@ export default function CharacterManagement({ onBack }) {
         // Optimistic update
         const currentConfig = voiceMapping[char] || {};
         const updatedConfig = { ...currentConfig, [field]: value };
+        // When voiceId changes, also update refAudio so TTS uses the new voice
+        // (backend checks refAudio first, then falls back to voiceId)
+        if (field === 'voiceId') {
+            updatedConfig.refAudio = value;
+        }
 
         const newMapping = { ...voiceMapping, [char]: updatedConfig };
         setVoiceMapping(newMapping);
@@ -254,8 +259,8 @@ export default function CharacterManagement({ onBack }) {
                                         <button
                                             onClick={() => updateCharacterConfig(char.name, 'useLLMEmotion', !(voiceMapping[char.name]?.useLLMEmotion ?? true))}
                                             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${(voiceMapping[char.name]?.useLLMEmotion ?? true)
-                                                    ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30 hover:bg-violet-600/30'
-                                                    : 'bg-gray-700/50 text-gray-400 border border-gray-600/50 hover:bg-gray-700'
+                                                ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30 hover:bg-violet-600/30'
+                                                : 'bg-gray-700/50 text-gray-400 border border-gray-600/50 hover:bg-gray-700'
                                                 }`}
                                         >
                                             {(voiceMapping[char.name]?.useLLMEmotion ?? true) ? 'LLM分析' : '默认情感'}

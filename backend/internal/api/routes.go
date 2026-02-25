@@ -36,6 +36,7 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config, staticFS fs.FS) {
 		api.POST("/confirm-mapping", ConfirmMapping)
 
 		api.POST("/generate/:chapterID", GenerateAudio)
+		api.POST("/generate-all", GenerateAllAudio)
 		api.GET("/audio-status/:chapterID", GetAudioStatus)
 		api.GET("/browse", BrowseFiles)
 		api.GET("/voices/list", ListConfiguredVoices(cfg))

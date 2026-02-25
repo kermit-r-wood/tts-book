@@ -75,10 +75,7 @@ export default function CharacterStudio({ chapterId, onGenerate, embedded, analy
                 ...current,
                 [field]: value
             };
-            // If we are updating voiceId, we usually want it to be our reference audio too
-            if (field === 'voiceId') {
-                updatedChar.refAudio = value;
-            }
+
             return {
                 ...prev,
                 [char]: updatedChar

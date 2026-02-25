@@ -62,10 +62,7 @@ func GenerateAudio(c *gin.Context) {
 			emotion := seg.Emotion
 
 			if hasMapping {
-				voice = mapping.RefAudio // Use full path for internal use
-				if voice == "" {
-					voice = mapping.VoiceID // Fallback
-				}
+				voice = mapping.VoiceID // Use full path for internal use
 
 				// Determine emotion based on UseLLMEmotion setting
 
@@ -125,7 +122,7 @@ func GenerateAudio(c *gin.Context) {
 			}
 
 			// Check for length and split if necessary
-			maxChars := 100 // Hardcoded limit for now
+			maxChars := 20 // Hardcoded limit for now
 			chunks := SplitTextForTTS(textToSpeak, maxChars)
 
 			var segmentAudioData []byte
@@ -342,8 +339,7 @@ func AnalyzeChapter(c *gin.Context) {
 				nextVoiceIdx++
 
 				Store.VoiceMapping[r.Speaker] = VoiceConfig{
-					VoiceID:       filepath.Base(voicePath),
-					RefAudio:      voicePath,
+					VoiceID:       voicePath,
 					Emotion:       "calm",
 					UseLLMEmotion: boolPtr(true), // Default to using LLM emotions
 				}
@@ -488,9 +484,7 @@ func AnalyzeAllChapters(c *gin.Context) {
 						nextVoiceIdx++
 
 						Store.VoiceMapping[r.Speaker] = VoiceConfig{
-							VoiceID: filepath.Base(voicePath),
-
-							RefAudio: voicePath,
+							VoiceID: voicePath,
 
 							Emotion: "calm",
 
@@ -668,4 +662,219 @@ func SplitTextForTTS(text string, maxChars int) []string {
 	}
 
 	return chunks
+}
+
+// GenerateAllAudio generates audio for all chapters sequentially, skipping chapters that already have audio files.
+func GenerateAllAudio(c *gin.Context) {
+	// Get all chapters
+	chapters, ok := LoadedChapters["current"]
+	if !ok || len(chapters) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No book loaded"})
+		return
+	}
+
+	Store.Mu.RLock()
+	bookID := Store.BookID
+	Store.Mu.RUnlock()
+
+	// Start async batch generation
+	go func() {
+		total := len(chapters)
+		successCount := 0
+		skippedCount := 0
+		failedChapters := []string{}
+
+		cfg := config.Get()
+		ttsClient := tts.NewClient(cfg)
+
+		for i, chapter := range chapters {
+			chapterID := chapter.ID
+			chapterTitle := chapter.Title
+			if chapterTitle == "" {
+				chapterTitle = fmt.Sprintf("Chapter %s", chapterID)
+			}
+
+			// Broadcast overall progress
+			overallPercent := int((float64(i) / float64(total)) * 100)
+			BroadcastProgress("batch-generate", overallPercent, fmt.Sprintf("Processing %s (%d/%d)...", chapterTitle, i+1, total))
+
+			// Check if audio already exists
+			outDir := fmt.Sprintf("data/out/%s", bookID)
+			audioPath := fmt.Sprintf("%s/%s.wav", outDir, chapterID)
+			if _, err := os.Stat(audioPath); err == nil {
+				log.Printf("[GenerateAll] Audio already exists for chapter %s, skipping", chapterID)
+				skippedCount++
+				continue
+			}
+
+			// Check if chapter has analysis data
+			Store.Mu.RLock()
+			segments, hasAnalysis := Store.Analysis[chapterID]
+			Store.Mu.RUnlock()
+
+			if !hasAnalysis || len(segments) == 0 {
+				log.Printf("[GenerateAll] Chapter %s has no analysis data, skipping", chapterID)
+				failedChapters = append(failedChapters, chapterTitle+" (no analysis)")
+				continue
+			}
+
+			// Generate audio for this chapter (inline logic from GenerateAudio)
+			tempDir := fmt.Sprintf("data/temp/%s", chapterID)
+			os.MkdirAll(tempDir, 0755)
+			os.MkdirAll(outDir, 0755)
+
+			segTotal := len(segments)
+			var filePaths []string
+			chapterFailed := false
+
+			for j, seg := range segments {
+				Store.Mu.RLock()
+				mapping, hasMapping := Store.VoiceMapping[seg.Speaker]
+				Store.Mu.RUnlock()
+
+				voice := ""
+				emotion := seg.Emotion
+
+				if hasMapping {
+					voice = mapping.VoiceID
+
+					useLLM := true
+					if mapping.UseLLMEmotion != nil {
+						useLLM = *mapping.UseLLMEmotion
+					}
+
+					if useLLM {
+						if seg.Emotion != "" {
+							emotion = seg.Emotion
+						}
+					} else {
+						if mapping.Emotion != "" {
+							emotion = mapping.Emotion
+						}
+					}
+				}
+
+				if emotion == "" {
+					emotion = "calm"
+				}
+
+				// Progress for this segment within the chapter
+				segPercent := int((float64(j) / float64(segTotal)) * 100)
+				runes := []rune(seg.Text)
+				display := string(runes)
+				if len(runes) > 10 {
+					display = string(runes[:10])
+				}
+				BroadcastProgress("batch-generate", overallPercent, fmt.Sprintf("%s (%d/%d) Seg %d/%d: %s...", chapterTitle, i+1, total, j+1, segTotal, display))
+
+				textToSpeak := seg.Typesetting
+				if textToSpeak == "" {
+					textToSpeak = seg.Text
+				}
+
+				maxChars := 100
+				chunks := SplitTextForTTS(textToSpeak, maxChars)
+
+				var segmentAudioData []byte
+
+				if len(chunks) == 1 {
+					log.Printf("[GenerateAll] Chapter %s segment %d: %s", chapterID, j, textToSpeak)
+					audioData, err := ttsClient.Generate(textToSpeak, voice, emotion)
+					if err != nil {
+						log.Printf("[GenerateAll] Error generating chapter %s segment %d: %v", chapterID, j, err)
+						failedChapters = append(failedChapters, chapterTitle)
+						chapterFailed = true
+						break
+					}
+					segmentAudioData = audioData
+				} else {
+					log.Printf("[GenerateAll] Chapter %s segment %d is long, split into %d chunks", chapterID, j, len(chunks))
+					var chunkFiles []string
+
+					for k, chunk := range chunks {
+						BroadcastProgress("batch-generate", overallPercent+segPercent/total, fmt.Sprintf("%s Seg %d/%d Part %d/%d", chapterTitle, j+1, segTotal, k+1, len(chunks)))
+						chunkAudio, err := ttsClient.Generate(chunk, voice, emotion)
+						if err != nil {
+							log.Printf("[GenerateAll] Error chapter %s seg %d chunk %d: %v", chapterID, j, k, err)
+							failedChapters = append(failedChapters, chapterTitle)
+							chapterFailed = true
+							break
+						}
+
+						chunkPath := fmt.Sprintf("%s/%d_part_%d.wav", tempDir, j, k)
+						if err := os.WriteFile(chunkPath, chunkAudio, 0644); err != nil {
+							log.Printf("[GenerateAll] Failed to write chunk: %v", err)
+							chapterFailed = true
+							break
+						}
+						chunkFiles = append(chunkFiles, chunkPath)
+					}
+
+					if chapterFailed {
+						break
+					}
+
+					mergedPath := fmt.Sprintf("%s/%d_merged.wav", tempDir, j)
+					if err := audio.MergeAndNormalize(chunkFiles, mergedPath, 0, false); err != nil {
+						log.Printf("[GenerateAll] Failed to merge chunks: %v", err)
+						failedChapters = append(failedChapters, chapterTitle)
+						chapterFailed = true
+						break
+					}
+
+					data, err := os.ReadFile(mergedPath)
+					if err != nil {
+						log.Printf("[GenerateAll] Failed to read merged: %v", err)
+						chapterFailed = true
+						break
+					}
+					segmentAudioData = data
+
+					for _, f := range chunkFiles {
+						os.Remove(f)
+					}
+					os.Remove(mergedPath)
+				}
+
+				if chapterFailed {
+					break
+				}
+
+				filePath := fmt.Sprintf("%s/%d.wav", tempDir, j)
+				if err := os.WriteFile(filePath, segmentAudioData, 0644); err != nil {
+					log.Printf("[GenerateAll] Failed to write temp: %v", err)
+					chapterFailed = true
+					break
+				}
+				filePaths = append(filePaths, filePath)
+			}
+
+			if chapterFailed {
+				os.RemoveAll(tempDir)
+				continue
+			}
+
+			// Merge all segments for this chapter
+			outPath := fmt.Sprintf("%s/%s.wav", outDir, chapterID)
+			if err := audio.MergeAndNormalize(filePaths, outPath, cfg.MergeSilence, cfg.NormalizeAudio); err != nil {
+				log.Printf("[GenerateAll] Merge failed for chapter %s: %v", chapterID, err)
+				failedChapters = append(failedChapters, chapterTitle)
+				os.RemoveAll(tempDir)
+				continue
+			}
+
+			os.RemoveAll(tempDir)
+			successCount++
+			log.Printf("[GenerateAll] Chapter %s completed successfully", chapterID)
+		}
+
+		// Broadcast completion
+		if len(failedChapters) > 0 {
+			BroadcastProgress("batch-generate", 100, fmt.Sprintf("Done. %d generated, %d skipped, %d failed: %v", successCount, skippedCount, len(failedChapters), failedChapters))
+		} else {
+			BroadcastProgress("batch-generate", 100, fmt.Sprintf("All done! %d generated, %d skipped.", successCount, skippedCount))
+		}
+	}()
+
+	c.JSON(http.StatusOK, gin.H{"status": "started", "totalChapters": len(chapters)})
 }

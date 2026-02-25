@@ -22,6 +22,7 @@ export const api = {
 
     // Start generation
     generateAudio: (chapterId) => axios.post(`${API_BASE}/generate/${chapterId}`),
+    generateAllAudio: () => axios.post(`${API_BASE}/generate-all`),
     checkAudioStatus: (chapterId) => axios.get(`${API_BASE}/audio-status/${chapterId}`),
 
     getVoiceList: () => axios.get(`${API_BASE}/voices/list`),
