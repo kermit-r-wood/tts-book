@@ -6,8 +6,10 @@ require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-resty/resty/v2 v2.17.1
 	github.com/gorilla/websocket v1.5.3
+	github.com/mozillazg/go-pinyin v0.21.0
 	github.com/sashabaranov/go-openai v1.41.2
 	golang.org/x/net v0.43.0
+	golang.org/x/text v0.28.0
 	google.golang.org/genai v1.40.0
 )
 
@@ -47,7 +49,6 @@ require (
 	golang.org/x/mod v0.26.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
-	golang.org/x/text v0.28.0 // indirect
 	golang.org/x/tools v0.35.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
 	google.golang.org/grpc v1.66.2 // indirect

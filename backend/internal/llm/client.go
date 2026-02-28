@@ -65,26 +65,30 @@ const systemPrompt = `
 	- 对话 (Dialogue)：引号内的内容。Speaker: 角色名称。
 
 	关键规则 2：Typesetting 字段 (Pinyin Annotation)
-	"typesetting" 字段用于语音合成。
+	"typesetting" 字段专门用于给 TTS 引擎提供标准发音。
 	1. 【默认行为】：完全复制 "text" 字段的内容。
-	2. 【仅修改多音字】：只有在遇到以下列表中的多音字时，将其【替换】为【对应的大写拼音+声调数字】。
-	   【重要】：替换的意思是**删掉原字**，填入拼音。严禁保留原字。
-	   正确示例： "难产" -> "NAN2产"
-	   错误示例 1 (吞字)： "难产" -> "NAN2"
-	   错误示例 2 (保留原字)： "难产" -> "难NAN2产"
-	3. 【严禁】：不要替换非多音字。不要留空。
+	2. 【仅修改多音字】：遇到以下列表中的多音字时，【绝对禁止】在 typesetting 中保留该汉字本身。你必须把那个汉字【删掉】，并在其原位置写上大写拼音和声调数字。
+	3. 【上下文语境分析】：必须根据当前这句话在整个剧情中的语境、人物身份、动作来判断多音字的正确读音。例如，“他重重地摔在地上”（ZHONG4 ZHONG4 DE5）。
+
+	🚨🚨🚨 极其严格的格式警告 🚨🚨🚨
+	严禁出现“原字+拼音”的组合！
+	【正确示例】： 把 "难产" 变成 "NAN2产"
+	【错误示例 1 (包含原字) 】： 把 "难产" 变成 "难NAN2产" (导致TTS读错)
+	【错误示例 2 (吞弃字) 】： 把 "难产" 变成 "NAN2"
 
 	多音字强制替换列表 (Mandatory Pinyin Replacement):
-	- 【行】：XH2 (银行) / XING2 (行为)
+	- 【行】：HANG2 (银行行长, 行业) / XING2 (行为, 行走)
 	- 【得】：DEI3 (得去) / DE2 (跑得快) / DE5 (觉得)
 	- 【地】：DI4 (田地) / DE5 (慢慢地)
-	- 【重】：CHONG2 (重新) / ZHONG4 (重要, 重担)
-	- 【着】：ZHAO2 (着火) / ZHE5 (看着) / ZHUO2 (着装)
-	- 【长】：CHANG2 (长短) / ZHANG3 (长大)
+	- 【重】：CHONG2 (重新, 重复) / ZHONG4 (重要, 重担, 重重地)
+	- 【着】：ZHAO2 (着火, 睡着) / ZHE5 (看着, 走着) / ZHUO2 (着装)
+	- 【长】：CHANG2 (长短, 长枪) / ZHANG3 (长大, 长官)
 	- 【乐】：LE4 (快乐) / YUE4 (音乐)
-	- 【好】：HAO3 (好人) / HAO4 (爱好)
-	- 【干】：GAN1 (干净) / GAN4 (干活)
+	- 【好】：HAO3 (好人, 好吃) / HAO4 (爱好, 好大喜功)
+	- 【干】：GAN1 (干净, 饼干) / GAN4 (干活, 能干)
 	- 【难】：NAN2 (难产, 困难, 为难) / NAN4 (灾难, 难民)
+	- 【降】：JIANG4 (降落, 下降) / XIANG2 (投降, 降服)
+	- 【传】：CHUAN2 (传说, 传递) / ZHUAN4 (传记)
 
 	关键规则 3：精准识别角色 (Contextual Speaker Inference)
 	根据上下文推理角色名称，严禁使用“男角色”、“女角色”。
@@ -217,11 +221,10 @@ func (c *Client) AnalyzeTextStream(text string, onToken func(string)) ([]Analysi
 		}
 
 		req := openai.ChatCompletionRequest{
-			Model:       c.model,
-			Messages:    messages,
-			Stream:      true,
+			Model:    c.model,
+			Messages: messages,
+			Stream:   true,
 		}
-
 
 		stream, err := c.api.CreateChatCompletionStream(context.Background(), req)
 		if err != nil {

@@ -1,10 +1,13 @@
 package api
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"regexp"
+	"strings"
 
 	"math/rand"
 	"path/filepath"
@@ -17,7 +20,79 @@ import (
 	"tts-book/backend/internal/tts"
 
 	"github.com/gin-gonic/gin"
+	"github.com/mozillazg/go-pinyin"
 )
+
+var redundantCharRegex = regexp.MustCompile(`([\p{Han}])([A-Z]+[1-5])`)
+var pinyinWhitelist = make(map[string]bool)
+
+func init() {
+	// Load pinyin.vocab into whitelist
+	file, err := os.Open("data/pinyin.vocab")
+	if err != nil {
+		log.Printf("[Init] Warning: Could not open data/pinyin.vocab: %v", err)
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			pinyinWhitelist[line] = true
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("[Init] Error reading pinyin.vocab: %v", err)
+	}
+	log.Printf("[Init] Loaded %d valid pinyins into whitelist", len(pinyinWhitelist))
+}
+
+func cleanTypesetting(typesetting, originalText string) string {
+	// 1. Regex Cleanup for glued characters
+	cleaned := redundantCharRegex.ReplaceAllString(typesetting, "$2")
+
+	// 2. Dictionary Fallback
+	// Only run fallback if there are pinyin-like structures
+	pinyinPattern := regexp.MustCompile(`[A-Z]+[1-5]`)
+	words := pinyinPattern.FindAllString(cleaned, -1)
+
+	for _, word := range words {
+		if !pinyinWhitelist[word] {
+			log.Printf("[Typesetting] Warning: LLM produced invalid pinyin '%s'", word)
+
+			// Try to find the valid pinyin using go-pinyin on the original text
+			args := pinyin.NewArgs()
+			args.Style = pinyin.Tone3 // e.g., "hao3"
+			args.Heteronym = true     // Get all possible pronunciations
+
+			pinyinMatrix := pinyin.Pinyin(originalText, args)
+
+			// Search for a valid replacement
+			replacementFound := false
+			for _, charPinyins := range pinyinMatrix {
+				for _, py := range charPinyins {
+					upperPy := strings.ToUpper(py)
+					if pinyinWhitelist[upperPy] {
+						// Found a valid pinyin in our whitelist for this character!
+						// We replace the invalid word with this valid one.
+						// Note: This is a simpler heuristic, it assumes the invalid pinyin is a mistake
+						// that maps to *some* character in the original text.
+						cleaned = strings.Replace(cleaned, word, upperPy, 1)
+						log.Printf("[Typesetting] Replaced invalid '%s' with '%s'", word, upperPy)
+						replacementFound = true
+						break
+					}
+				}
+				if replacementFound {
+					break
+				}
+			}
+		}
+	}
+
+	return cleaned
+}
 
 // GenerateAudio orchestrates the TTS generation
 func GenerateAudio(c *gin.Context) {
@@ -116,9 +191,13 @@ func GenerateAudio(c *gin.Context) {
 			}
 			BroadcastProgress(chapterID, int((float64(i)/float64(total))*100), fmt.Sprintf("Generating (%d/%d): %s...", i+1, total, display))
 
-			textToSpeak := seg.Typesetting
+			textToSpeak := strings.TrimSpace(seg.Typesetting)
 			if textToSpeak == "" {
-				textToSpeak = seg.Text
+				textToSpeak = strings.TrimSpace(seg.Text)
+			}
+			if textToSpeak == "" {
+				log.Printf("[TTS] Skipping empty segment %d", i)
+				continue
 			}
 
 			// Check for length and split if necessary
@@ -299,6 +378,12 @@ func AnalyzeChapter(c *gin.Context) {
 			return
 		}
 
+		for k := range results {
+			if results[k].Typesetting != "" {
+				results[k].Typesetting = cleanTypesetting(results[k].Typesetting, results[k].Text)
+			}
+		}
+
 		allResults = append(allResults, results...)
 	}
 
@@ -439,6 +524,12 @@ func AnalyzeAllChapters(c *gin.Context) {
 					failedChapters = append(failedChapters, chapterTitle)
 					chunkFailed = true
 					break
+				}
+
+				for k := range results {
+					if results[k].Typesetting != "" {
+						results[k].Typesetting = cleanTypesetting(results[k].Typesetting, results[k].Text)
+					}
 				}
 
 				allResults = append(allResults, results...)
@@ -767,9 +858,13 @@ func GenerateAllAudio(c *gin.Context) {
 				}
 				BroadcastProgress("batch-generate", overallPercent, fmt.Sprintf("%s (%d/%d) Seg %d/%d: %s...", chapterTitle, i+1, total, j+1, segTotal, display))
 
-				textToSpeak := seg.Typesetting
+				textToSpeak := strings.TrimSpace(seg.Typesetting)
 				if textToSpeak == "" {
-					textToSpeak = seg.Text
+					textToSpeak = strings.TrimSpace(seg.Text)
+				}
+				if textToSpeak == "" {
+					log.Printf("[GenerateAll] Skipping empty segment %d in chapter %s", j, chapterID)
+					continue
 				}
 
 				maxChars := 100
