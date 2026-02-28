@@ -37,6 +37,7 @@ backend/server.log
 backend/config.json
 backend/data/*
 !backend/data/.gitkeep
+!backend/data/pinyin.vocab
 backend/uploads/*
 !backend/uploads/.gitkeep
 
